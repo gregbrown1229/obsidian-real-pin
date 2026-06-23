@@ -1,7 +1,7 @@
 {
 	"id": "real-pin",
 	"name": "Real Pin",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"minAppVersion": "1.4.0",
 	"description": "Confirms before closing a pinned tab via any close hotkey or command, so a stray Cmd+W can't lose your pinned tab.",
 	"author": "Greg Brown",
