@@ -37,7 +37,7 @@ export class ConfirmCloseModal extends Modal {
 			.addButton((btn) =>
 				btn
 					.setButtonText("Close tab")
-					.setDestructive()
+					.setWarning()
 					.onClick(() => {
 						this.settle(true);
 						this.close();
