@@ -1,4 +1,4 @@
-import { Plugin } from "obsidian";
+import { Plugin, View } from "obsidian";
 import { around } from "monkey-around";
 import { ConfirmCloseModal } from "./ConfirmCloseModal";
 import {
@@ -46,7 +46,12 @@ export default class RealPinPlugin extends Plugin {
 		// degrade to a no-op rather than throwing on load.
 		if (typeof closeCmd?.checkCallback !== "function") return;
 
-		const plugin = this;
+		// Capture what the wrapper needs as locals rather than aliasing `this`,
+		// so the patched function keeps its own `this` (the command object) for
+		// `next.call`. `settings` is mutated in place by the settings tab, so
+		// reads through this reference stay live.
+		const { app, settings } = this;
+
 		this.register(
 			around(closeCmd as { checkCallback: CheckCallback }, {
 				checkCallback: (next) =>
@@ -56,7 +61,8 @@ export default class RealPinPlugin extends Plugin {
 						// normally would (pinned or not).
 						if (checking) return next.call(this, true);
 
-						const leaf = plugin.app.workspace.activeLeaf;
+						// The active view's leaf is the tab the close command targets.
+						const leaf = app.workspace.getActiveViewOfType(View)?.leaf;
 						// `getViewState().pinned` is the public read accessor for pin
 						// state (the bare `leaf.pinned` field isn't typed).
 						if (!leaf || !leaf.getViewState().pinned) {
@@ -65,7 +71,7 @@ export default class RealPinPlugin extends Plugin {
 
 						// Pinned. Read the setting live so toggling takes effect
 						// immediately, without re-wrapping the command.
-						if (!plugin.settings.confirmBeforeClose) {
+						if (!settings.confirmBeforeClose) {
 							// Toggle off: block the close outright.
 							return true;
 						}
@@ -74,11 +80,9 @@ export default class RealPinPlugin extends Plugin {
 						// Obsidian doesn't await command callbacks, so fire the modal
 						// and run the original close only on confirm. Return true to
 						// mark the invocation handled.
-						void new ConfirmCloseModal(plugin.app)
-							.ask()
-							.then((confirmed) => {
-								if (confirmed) next.call(this, false);
-							});
+						void new ConfirmCloseModal(app).ask().then((confirmed) => {
+							if (confirmed) next.call(this, false);
+						});
 						return true;
 					},
 			}),
