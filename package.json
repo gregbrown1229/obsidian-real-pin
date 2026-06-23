@@ -1,6 +1,6 @@
 {
 	"name": "real-pin",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Confirms before closing a pinned tab via any close hotkey or command.",
 	"main": "main.js",
 	"type": "module",
