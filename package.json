@@ -1,0 +1,30 @@
+{
+	"name": "real-pin",
+	"version": "1.0.0",
+	"description": "Confirms before closing a pinned tab via any close hotkey or command.",
+	"main": "main.js",
+	"type": "module",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+	},
+	"keywords": [
+		"obsidian",
+		"plugin",
+		"pin",
+		"tabs"
+	],
+	"author": "Greg Brown",
+	"license": "MIT",
+	"dependencies": {
+		"monkey-around": "^2.3.0"
+	},
+	"devDependencies": {
+		"@types/node": "^16.11.6",
+		"builtin-modules": "^3.3.0",
+		"esbuild": "^0.20.2",
+		"obsidian": "latest",
+		"tslib": "^2.6.2",
+		"typescript": "^5.4.5"
+	}
+}
