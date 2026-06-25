@@ -37,6 +37,11 @@ export class ConfirmCloseModal extends Modal {
 			.addButton((btn) =>
 				btn
 					.setButtonText("Close tab")
+					// setWarning() is deprecated in favor of setDestructive(), but
+					// setDestructive() is @since 1.13.0 and this plugin targets
+					// minAppVersion 1.4.0 — calling it would throw on older Obsidian.
+					// setWarning() works since 0.11.0; keep it until minAppVersion rises.
+					// eslint-disable-next-line @typescript-eslint/no-deprecated -- intentional for 1.4.0 compat
 					.setWarning()
 					.onClick(() => {
 						this.settle(true);

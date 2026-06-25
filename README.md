@@ -31,10 +31,43 @@ The toggle takes effect immediately — no reload needed.
 ## Develop
 
 ```bash
-npm install
-npm run dev    # esbuild watch → main.js
-npm run build  # typecheck + production bundle
+npm install         # also installs the pre-push git hook (core.hooksPath)
+npm run dev         # esbuild watch → main.js
+npm run build       # typecheck + production bundle
+npm run check       # the full gate: validate + lint + typecheck + test
 ```
+
+### Publishing-rule enforcement
+
+The Obsidian publishing rules are enforced mechanically at three points, so a
+non-compliant change can't reach a release:
+
+- **`npm run lint`** runs the official [`eslint-plugin-obsidianmd`](https://github.com/obsidianmd/eslint-plugin)
+  recommended set. This owns the manifest-field rules (`validate-manifest`) and,
+  critically, **`no-unsupported-api`** — it reads `manifest.json`'s `minAppVersion`
+  and flags any Obsidian API newer than it (e.g. `setDestructive()`, which needs
+  1.13.0, under `minAppVersion 1.4.0`).
+- **`npm run validate`** ([`scripts/validate-plugin.mjs`](scripts/validate-plugin.mjs))
+  owns the cross-file/release rules ESLint can't see: `manifest.json` ↔
+  `package.json` ↔ `versions.json` version consistency, the `versions.json` ↔
+  `minAppVersion` mapping, required `README.md`/`LICENSE`, and — in release mode
+  (`--release-tag <tag>`) — that the git tag equals `manifest.version` and is
+  present in `versions.json`.
+- **Where they run:** a **pre-push git hook** ([`.githooks/pre-push`](.githooks/pre-push))
+  runs `npm run check` and validates any tag being pushed; **CI**
+  ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs it on every PR and
+  push to `main`; and the **release workflow** re-runs it (plus the release-tag
+  check) before building, so a botched tag/version never produces a release.
+
+### Cutting a release
+
+```bash
+npm version patch        # bumps manifest/package/versions, validates, commits, tags (no 'v')
+git push --follow-tags   # pre-push hook gates it → release workflow builds an attested draft
+```
+
+Then publish the draft release. (One gap tooling can't close: creating a release
+by hand in the GitHub UI bypasses this pipeline — always release via tag push.)
 
 ## How it works
 

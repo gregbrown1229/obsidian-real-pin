@@ -1,0 +1,19 @@
+#!/bin/sh
+# Enforce the Obsidian publishing rules before anything leaves the machine.
+# Installed via `npm run prepare` (sets git config core.hooksPath .githooks).
+set -e
+
+# Full static gate: cross-file validation + eslint (no-unsupported-api,
+# validate-manifest, ...) + typecheck + validator tests.
+npm run check
+
+# For every tag being pushed, assert it matches manifest.version and is present
+# in versions.json — the guard that would have blocked the botched 1.0.2 tag.
+while read -r _local_ref _local_oid remote_ref _remote_oid; do
+	case "$remote_ref" in
+		refs/tags/*)
+			tag="${remote_ref#refs/tags/}"
+			node scripts/validate-plugin.mjs --release-tag "$tag"
+			;;
+	esac
+done

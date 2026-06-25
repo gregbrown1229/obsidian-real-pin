@@ -21,10 +21,16 @@ jobs:
                   node-version: 24
                   cache: 'npm'
 
-            - name: Build plugin
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Enforce publishing rules (incl. release tag)
               run: |
-                  npm ci
-                  npm run build
+                  npm run check
+                  node scripts/validate-plugin.mjs --release-tag "${GITHUB_REF#refs/tags/}"
+
+            - name: Build plugin
+              run: npm run build
 
             - name: Attest build provenance
               uses: actions/attest-build-provenance@v4
