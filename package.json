@@ -12,6 +12,7 @@
 		"lint:fix": "eslint . --fix",
 		"validate": "node scripts/validate-plugin.mjs",
 		"test": "node --test scripts/*.test.mjs",
+		"test:e2e": "node --test test/e2e/*.e2e.mjs",
 		"check": "npm run validate && npm run lint && npm run typecheck && npm test",
 		"version": "node version-bump.mjs && node scripts/validate-plugin.mjs && git add manifest.json versions.json",
 		"prepare": "git config core.hooksPath .githooks || true"
@@ -29,11 +30,13 @@
 	},
 	"devDependencies": {
 		"@types/node": "^16.11.6",
+		"chrome-remote-interface": "^0.34.0",
 		"esbuild": "^0.20.2",
 		"eslint": "^9.39.4",
 		"eslint-plugin-obsidianmd": "^0.3.0",
 		"globals": "^17.7.0",
 		"obsidian": "~1.13.1",
+		"obsidian-launcher": "^3.1.1",
 		"tslib": "^2.6.2",
 		"typescript": "^5.4.5",
 		"typescript-eslint": "^8.62.0"

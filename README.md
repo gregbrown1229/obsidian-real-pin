@@ -48,6 +48,17 @@ npm run check       # the full gate: validate + lint + typecheck + test
 
 Every change ships production-ready — see [CONTRIBUTING.md](CONTRIBUTING.md) for the bar (strict types, the green `npm run check` gate, pure logic unit-tested under `node --test`, clean teardown, accessibility, and packaging kept in sync).
 
+### End-to-end tests
+
+`npm run test:e2e` drives the compact-pinned-tabs feature in a **real, headless Obsidian** with Iconize installed — the automated form of manually pinning tabs in the app. It launches a sandboxed Obsidian via [`obsidian-launcher`](https://www.npmjs.com/package/obsidian-launcher) and drives the renderer over the Chrome DevTools Protocol (Obsidian's packaged-Electron build blocks Playwright, so we use raw CDP, as the Obsidian CLI and WebdriverIO do).
+
+```bash
+npm run build         # the test installs the built plugin, so build first
+npm run test:e2e      # needs a display; on a headless box wrap it: xvfb-run -a npm run test:e2e
+```
+
+The first run downloads Obsidian + Iconize (cached afterward under `.obsidian-cache/`). These tests are heavier and slower than the unit gate, so they run in a **separate workflow** ([`e2e.yml`](.github/workflows/e2e.yml), nightly + manual) and are **not** part of the required `check` gate.
+
 ### Publishing-rule enforcement
 
 The Obsidian publishing rules are enforced mechanically at three points, so a

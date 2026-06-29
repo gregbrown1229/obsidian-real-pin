@@ -39,6 +39,12 @@ vs the newer `setDestructive()`.
   The tested code is the shipped code — the controller imports the same module.
   (Tests import the `.ts` source directly via Node's native type-stripping;
   requires Node ≥ 22.18, which CI and the dev toolchain use.)
+- **Behavior that only exists inside Obsidian gets an end-to-end test.** Anything
+  the unit gate can't reach — real tab DOM, cross-plugin integration (Iconize),
+  pin/unpin, that `styles.css` actually applies — goes in `test/e2e/*.e2e.mjs`,
+  which drives a real headless Obsidian over CDP (see the README). E2E is the
+  automated form of manual checklists; prefer it over "I clicked around and it
+  worked." Keep it in its own workflow, off the fast `check` gate.
 - **Clean lifecycle / teardown.** Wire listeners and patches through
   `registerEvent` / `register` so they auto-unwind on unload. Anything that
   mutates the DOM must fully reverse on teardown, setting-off, and dependency

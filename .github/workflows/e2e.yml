@@ -1,0 +1,50 @@
+name: E2E (Obsidian)
+
+# Heavyweight end-to-end tests: they download a real Obsidian + Iconize and drive
+# a headless instance, so they are intentionally kept OFF the fast `check` gate in
+# ci.yml. Run them on demand or nightly.
+on:
+    workflow_dispatch:
+    schedule:
+        # Nightly at 04:37 UTC (off-peak minute).
+        - cron: '37 4 * * *'
+
+permissions:
+    contents: read
+
+jobs:
+    e2e:
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        env:
+            # Cache the downloaded Obsidian/Iconize here so reruns are fast.
+            OBSIDIAN_CACHE: ${{ github.workspace }}/.obsidian-cache
+        steps:
+            - uses: actions/checkout@v7
+
+            - name: Use Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: 'npm'
+
+            - name: Install Electron runtime libraries + xvfb
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y --no-install-recommends \
+                    xvfb libgbm1 libgtk-3-0 libnss3 libasound2t64
+
+            - name: Cache Obsidian downloads
+              uses: actions/cache@v4
+              with:
+                  path: ${{ github.workspace }}/.obsidian-cache
+                  key: obsidian-cache-${{ runner.os }}
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Build plugin
+              run: npm run build
+
+            - name: Run E2E tests (headless via xvfb)
+              run: xvfb-run -a npm run test:e2e
