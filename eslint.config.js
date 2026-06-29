@@ -42,6 +42,13 @@ export default defineConfig([
 		// Make manifest.json lintable so validate-manifest actually runs. It is
 		// parsed (not type-checked) into an object expression via the TS parser
 		// with extraFileExtensions; validate-manifest self-filters to manifest.json.
+		//
+		// This block (and the global parserOptions above) is a workaround for
+		// eslint-plugin-obsidianmd 0.3.0, whose recommended config leaks type-aware
+		// rules onto non-TS files (obsidianmd/eslint-plugin#155, #167; root cause
+		// #130). When the fix (PR #165) ships, revisit this — much of the manual
+		// scoping here, and the redundant manifest.json entry in allowDefaultProject
+		// above, should be removable.
 		files: ["manifest.json"],
 		languageOptions: {
 			parser: tseslint.parser,
