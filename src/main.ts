@@ -1,6 +1,7 @@
 import { Plugin, View } from "obsidian";
 import { around } from "monkey-around";
 import { ConfirmCloseModal } from "./ConfirmCloseModal";
+import { CompactPinnedTabs } from "./compactPinnedTabs";
 import {
 	DEFAULT_SETTINGS,
 	RealPinSettings,
@@ -18,11 +19,18 @@ type CommandsRegistry = { commands: Record<string, CloseCommand | undefined> };
 
 export default class RealPinPlugin extends Plugin {
 	settings!: RealPinSettings;
+	compactTabs!: CompactPinnedTabs;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.addSettingTab(new RealPinSettingTab(this.app, this));
 		this.patchCloseCommand();
+
+		// Compact pinned tabs: start once the layout is ready (so tab headers
+		// exist for the first paint), and strip our markers on unload.
+		this.compactTabs = new CompactPinnedTabs(this);
+		this.app.workspace.onLayoutReady(() => this.compactTabs.start());
+		this.register(() => this.compactTabs.clearAll());
 	}
 
 	async loadSettings(): Promise<void> {

@@ -15,6 +15,15 @@ Because it hooks the command rather than a specific key, it works no matter whic
 
 The toggle takes effect immediately — no reload needed.
 
+**Compact pinned tabs** (default: off)
+
+Shrinks a pinned tab to just its icon when it has one, so a row of pinned tabs reads as a compact icon strip.
+
+- Requires the **[Iconize](https://github.com/FlorianWoelki/obsidian-iconize)** plugin with its **Toggle icon in tabs** setting on — Real Pin relies on Iconize to render the icon and never injects its own. The toggle is disabled until Iconize is available.
+- Only pinned tabs that **have an assigned icon** shrink. A pinned tab with no icon keeps its title, so it stays distinguishable.
+- The title isn't lost: hover the compact tab and it shows as a tooltip (and it's exposed to screen readers via `aria-label`). The close “×” and right-click menu still work.
+- Works in popped-out windows too. Takes effect immediately — no reload needed. Turning it off (or disabling Iconize, or disabling Real Pin) restores every tab.
+
 ## Scope
 
 - ✅ `Cmd+W` / `Ctrl+W` and any custom hotkey bound to **Close current tab**
@@ -24,8 +33,8 @@ The toggle takes effect immediately — no reload needed.
 
 ## Install (manual)
 
-1. Build or download `main.js` and `manifest.json`.
-2. Copy both into `<your-vault>/.obsidian/plugins/real-pin/`.
+1. Build or download `main.js`, `manifest.json`, and `styles.css`.
+2. Copy all three into `<your-vault>/.obsidian/plugins/real-pin/`.
 3. In Obsidian, open **Settings → Community plugins**, reload plugins, and enable **Real Pin**.
 
 ## Develop
@@ -36,6 +45,8 @@ npm run dev         # esbuild watch → main.js
 npm run build       # typecheck + production bundle
 npm run check       # the full gate: validate + lint + typecheck + test
 ```
+
+Every change ships production-ready — see [CONTRIBUTING.md](CONTRIBUTING.md) for the bar (strict types, the green `npm run check` gate, pure logic unit-tested under `node --test`, clean teardown, accessibility, and packaging kept in sync).
 
 ### Publishing-rule enforcement
 

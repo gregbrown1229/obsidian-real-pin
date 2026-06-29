@@ -1,0 +1,29 @@
+/*
+ * Real Pin — compact pinned tabs.
+ *
+ * Everything is scoped under the `.real-pin-compact-tab` marker class that the
+ * plugin toggles onto a pinned tab's header element, so this stylesheet has zero
+ * visual effect until the feature applies it. We never hide or zero-width the
+ * header itself — that would also kill the Iconize icon and the context-menu /
+ * close-button hit target. We only hide the title text and tighten the spacing
+ * so the header collapses to roughly icon width.
+ */
+
+.workspace-tab-header.real-pin-compact-tab .workspace-tab-header-inner-title {
+	display: none;
+}
+
+.workspace-tab-header.real-pin-compact-tab {
+	min-width: 0;
+	flex: 0 0 auto;
+}
+
+.workspace-tab-header.real-pin-compact-tab .workspace-tab-header-inner {
+	/* Logical property → mirrors correctly under RTL; var is Obsidian's spacing scale. */
+	padding-inline: var(--size-4-2);
+	gap: 0;
+}
+
+.workspace-tab-header.real-pin-compact-tab .workspace-tab-header-inner-icon {
+	margin: 0;
+}
