@@ -53,8 +53,6 @@ export class CompactPinnedTabs {
 	private compactDoc: Document | null = null;
 	/** Leaves we've already attached a `pinned-change` listener to. */
 	private readonly wiredLeaves = new WeakSet<WorkspaceLeaf>();
-	/** Debounced reconcile, shared by every trigger; set in `start()`. */
-	private scheduleRefresh: () => void = () => undefined;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -75,7 +73,6 @@ export class CompactPinnedTabs {
 		// (it only fires a per-leaf `pinned-change`), so those are wired separately in
 		// `wirePinnedChange`.
 		const onChange = debounce(() => this.refresh(), 50, true);
-		this.scheduleRefresh = onChange;
 		this.plugin.registerEvent(workspace.on("layout-change", onChange));
 		this.plugin.registerEvent(workspace.on("active-leaf-change", onChange));
 
@@ -149,7 +146,14 @@ export class CompactPinnedTabs {
 		if (this.wiredLeaves.has(leaf)) return;
 		this.wiredLeaves.add(leaf);
 		this.plugin.registerEvent(
-			leaf.on("pinned-change", () => this.scheduleRefresh()),
+			leaf.on("pinned-change", () => {
+				// Obsidian fires no workspace event on pin/unpin, so nothing reacts:
+				// our tab wouldn't re-compact, and Iconize wouldn't repaint the icon it
+				// dropped when it rebuilt the header (leaving a default file icon until
+				// you switch tabs). Firing `layout-change` ourselves covers both — it's
+				// what Obsidian itself fires for a layout change, and pin state is one.
+				this.plugin.app.workspace.trigger("layout-change");
+			}),
 		);
 	}
 
@@ -214,11 +218,19 @@ export class CompactPinnedTabs {
 		const file = (leaf.view as { file?: TFile }).file;
 		if (!file) return false;
 
-		if (
-			typeof iconize.getIconNameFromPath === "function" &&
-			iconize.getIconNameFromPath(file.path)
-		) {
-			return true;
+		if (typeof iconize.getIconNameFromPath === "function") {
+			// The file's own icon, or one inherited from an ancestor folder.
+			// `getIconNameFromPath` is exact-path-only, so walk the parents too —
+			// otherwise a folder-icon a tab visibly shows wouldn't be detected.
+			if (iconize.getIconNameFromPath(file.path)) return true;
+			for (
+				let dir = file.path, slash = dir.lastIndexOf("/");
+				slash > 0;
+				slash = dir.lastIndexOf("/")
+			) {
+				dir = dir.slice(0, slash);
+				if (iconize.getIconNameFromPath(dir)) return true;
+			}
 		}
 
 		const fieldName = iconize.settings?.iconInFrontmatterFieldName ?? "icon";
