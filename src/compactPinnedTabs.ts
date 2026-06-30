@@ -1,229 +1,78 @@
-import { debounce } from "obsidian";
-import type { TFile, WorkspaceLeaf } from "obsidian";
 import type RealPinPlugin from "./main";
-import { COMPACT_MARKER, SHRINK_ALL_PINNED, shouldCompact } from "./compactPolicy";
+
+/**
+ * Body class that arms the compact-pinned-tabs rules in `styles.css`. The
+ * stylesheet gates everything on this class, so the feature is fully inert until
+ * it's present — toggled by the "Compact pinned tabs" setting.
+ */
+const ENABLE_CLASS = "real-pin-compact-pinned-tabs";
 
 /** CSS variable `styles.css` reads for the compacted tab's max-width. */
 const WIDTH_VAR = "--real-pin-compact-tab-width";
 
-/** Iconize id, and the event it fires once its icon data has finished loading. */
-const ICONIZE_ID = "obsidian-icon-folder";
-const ICONIZE_READY_EVENT = "allIconsLoaded";
-
 /**
- * The tab header element a leaf is rendered into. It's real (Iconize depends on
- * it too) but not part of Obsidian's public type surface, so we model only the
- * sliver we touch and reach it through a narrow cast — mirroring how `main.ts`
- * casts `app` to reach `commands`.
- */
-interface LeafWithTabHeader {
-	tabHeaderEl?: HTMLElement;
-}
-
-/** Iconize's tiny event bus; we listen for its readiness event. */
-interface IconizeEmitter {
-	on(event: string, listener: () => void): void;
-	off?(event: string, listener: () => void): void;
-}
-
-/**
- * The sliver of Iconize (`obsidian-icon-folder`) we read. All members are
- * optional and every call is `typeof`-guarded, so a future Iconize change
- * degrades to "no icon" / inert rather than throwing.
- */
-interface IconizePlugin {
-	getIconNameFromPath?(path: string): string | undefined;
-	getEventEmitter?(): IconizeEmitter | undefined;
-	settings?: {
-		iconInTabsEnabled?: boolean;
-		iconInFrontmatterFieldName?: string;
-	};
-}
-
-/**
- * Shrinks pinned tabs that carry an Iconize icon down to icon-only. Real Pin
- * never renders icons or touches Iconize's nodes — it only toggles a marker
- * class (which the bundled `styles.css` styles) and an `aria-label` on the tab
- * header, then clears both on teardown.
+ * Drives the "compact pinned tabs" feature — which is otherwise **pure CSS**.
+ *
+ * Obsidian renders a `.workspace-tab-header-status-icon.mod-pinned` element
+ * inside a pinned tab's header (and only when pinned), so `styles.css` selects
+ * pinned tabs directly with `:has(...)` and shrinks them. That means there's no
+ * per-tab JavaScript at all — no pin/unpin listeners, no reconcile loop, no
+ * reading another plugin's state. All this class does is reflect two settings
+ * onto each window's `<body>`: the on/off enable class, and the width variable
+ * the stylesheet reads. CSS does the rest, reactively.
  */
 export class CompactPinnedTabs {
 	private readonly plugin: RealPinPlugin;
-	private started = false;
-	/** The main window's document, captured at start so width updates always land there. */
-	private compactDoc: Document | null = null;
-	/** Leaves we've already attached a `pinned-change` listener to. */
-	private readonly wiredLeaves = new WeakSet<WorkspaceLeaf>();
-	/** Debounced reconcile, shared by every trigger; set in `start()`. */
-	private scheduleRefresh: () => void = () => undefined;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
 	}
 
 	/**
-	 * Wire up the reconcile loop. Idempotent — safe to call more than once. Runs
-	 * on `onLayoutReady` so tab headers exist for the first paint and we don't
-	 * fight the `layout-change` storm of workspace deserialization.
+	 * Apply the current settings and keep new popout windows in sync. Idempotent.
+	 * Registers its own teardown, so unload (or disabling the plugin) reverts every
+	 * window cleanly.
 	 */
 	start(): void {
-		if (this.started) return;
-		this.started = true;
-
-		const { workspace } = this.plugin.app;
-		// One trailing-edge debounce shared by every trigger. `layout-change` covers
-		// open/close/move; `active-leaf-change` covers focus. Pin/unpin fires neither
-		// (it only fires a per-leaf `pinned-change`), so those are wired separately in
-		// `wirePinnedChange`.
-		const onChange = debounce(() => this.refresh(), 50, true);
-		this.scheduleRefresh = onChange;
-		this.plugin.registerEvent(workspace.on("layout-change", onChange));
-		this.plugin.registerEvent(workspace.on("active-leaf-change", onChange));
-
-		// Iconize loads its icon data asynchronously, sometimes after our first
-		// reconcile — that's the "tab starts expanded, shrinks on first click" race:
-		// `getIconNameFromPath` returns nothing until the data is in. Iconize fires
-		// `allIconsLoaded` once it's ready, so reconcile then and the tab compacts on
-		// its own. (The first `refresh()` below still covers the case where Iconize
-		// loaded before us.)
-		const iconize = this.getIconizePlugin();
-		const emitter = iconize?.getEventEmitter?.();
-		if (emitter && typeof emitter.on === "function") {
-			const onIconsReady = () => onChange();
-			emitter.on(ICONIZE_READY_EVENT, onIconsReady);
-			this.plugin.register(() => emitter.off?.(ICONIZE_READY_EVENT, onIconsReady));
-		}
-
-		this.compactDoc = activeDocument;
-		this.applyWidth();
-		this.plugin.register(() => this.clearWidth());
-
-		this.refresh();
-	}
-
-	/**
-	 * Push the configured compact width into the `--real-pin-compact-tab-width` CSS
-	 * variable that `styles.css` reads. Driven by the settings slider; called on
-	 * start and on every change so it updates live.
-	 */
-	applyWidth(): void {
-		// Setting a CSS *variable* (a config value the stylesheet consumes), not a
-		// static visual style — the width is user-tunable, so it can't live in
-		// styles.css.
-		this.compactDoc?.body.style.setProperty(
-			WIDTH_VAR,
-			`${this.plugin.settings.compactTabWidth}px`,
-		);
-	}
-
-	private clearWidth(): void {
-		this.compactDoc?.body.style.removeProperty(WIDTH_VAR);
-	}
-
-	/**
-	 * Reconcile every tab to the current setting. Reads the live setting each
-	 * time, so toggling takes effect immediately. Collapses to `clearAll()`
-	 * whenever the feature can't apply (setting off, or Iconize absent / not
-	 * painting tab icons).
-	 */
-	refresh(): void {
-		const iconize = this.getIconize();
-		if (!this.plugin.settings.compactPinnedTabs || !iconize) {
-			this.clearAll();
-			return;
-		}
-		// `iterateRootLeaves` covers the main window and popouts; sidebars are
-		// excluded by design (their tabs aren't part of the pinned-tab strip).
-		this.plugin.app.workspace.iterateRootLeaves((leaf) => {
-			this.wirePinnedChange(leaf);
-			this.reconcile(leaf, iconize);
-		});
-	}
-
-	/**
-	 * Pin/unpin fires no workspace-level event we listen to, so a tab wouldn't
-	 * re-compact until the next interaction (the "doesn't collapse until I select a
-	 * different tab" bug). Listen per-leaf for `pinned-change` instead — deduped via
-	 * a WeakSet, and auto-cleaned on unload via `registerEvent`.
-	 */
-	private wirePinnedChange(leaf: WorkspaceLeaf): void {
-		if (this.wiredLeaves.has(leaf)) return;
-		this.wiredLeaves.add(leaf);
+		// A popout opened later has its own <body>; arm it when it appears.
 		this.plugin.registerEvent(
-			leaf.on("pinned-change", () => this.scheduleRefresh()),
+			this.plugin.app.workspace.on("window-open", () => this.apply()),
 		);
-	}
-
-	/** Remove every marker + aria-label we set, across all leaves and windows. */
-	clearAll(): void {
-		this.plugin.app.workspace.iterateAllLeaves((leaf) => {
-			const header = (leaf as unknown as LeafWithTabHeader).tabHeaderEl;
-			// Only touch headers we actually compacted, so we never clobber an
-			// aria-label set by something else.
-			if (!header?.classList.contains(COMPACT_MARKER)) return;
-			header.classList.remove(COMPACT_MARKER);
-			header.removeAttribute("aria-label");
-		});
-	}
-
-	private reconcile(leaf: WorkspaceLeaf, iconize: IconizePlugin): void {
-		const header = (leaf as unknown as LeafWithTabHeader).tabHeaderEl;
-		if (!header) return;
-
-		const on = shouldCompact({
-			pinned: leaf.getViewState().pinned ?? false,
-			hasIcon: this.hasAssignedIcon(leaf, iconize),
-			shrinkAll: SHRINK_ALL_PINNED,
-		});
-
-		// `toggle(cls, force)` auto-removes the marker from tabs that stop
-		// qualifying, so no separate tracking is needed.
-		header.classList.toggle(COMPACT_MARKER, on);
-		if (on) header.setAttribute("aria-label", leaf.getDisplayText());
-		else header.removeAttribute("aria-label");
-	}
-
-	/** The Iconize plugin instance if it's installed/enabled, else null. */
-	private getIconizePlugin(): IconizePlugin | null {
-		return (
-			this.plugin.app as unknown as {
-				plugins: { getPlugin(id: string): IconizePlugin | null };
-			}
-		).plugins.getPlugin(ICONIZE_ID);
+		this.apply();
+		this.plugin.register(() => this.clear());
 	}
 
 	/**
-	 * Iconize, but only when it would actually be painting tab icons — i.e. its
-	 * `iconInTabsEnabled` setting isn't off. Otherwise `null`, so the feature stays
-	 * inert instead of hiding titles with nothing to show.
+	 * Reflect the live settings onto every open window's `<body>`: toggle the
+	 * enable class and set the width variable. Called on start, when a popout
+	 * opens, and from the settings tab so the toggle/slider take effect instantly.
 	 */
-	private getIconize(): IconizePlugin | null {
-		const iconize = this.getIconizePlugin();
-		if (!iconize) return null;
-		if (iconize.settings?.iconInTabsEnabled === false) return null;
-		return iconize;
-	}
-
-	/**
-	 * Whether this leaf's file has an Iconize icon. Reads Iconize's data
-	 * (`getIconNameFromPath`, which covers emoji and icon-pack icons alike) and
-	 * falls back to the frontmatter field, because `getIconNameFromPath` is
-	 * path-map-only and would miss frontmatter-assigned icons Iconize still renders.
-	 */
-	private hasAssignedIcon(leaf: WorkspaceLeaf, iconize: IconizePlugin): boolean {
-		// `file` lives on `FileView`, not the base `View`; read it defensively.
-		const file = (leaf.view as { file?: TFile }).file;
-		if (!file) return false;
-
-		if (
-			typeof iconize.getIconNameFromPath === "function" &&
-			iconize.getIconNameFromPath(file.path)
-		) {
-			return true;
+	apply(): void {
+		const { compactPinnedTabs, compactTabWidth } = this.plugin.settings;
+		for (const body of this.bodies()) {
+			body.classList.toggle(ENABLE_CLASS, compactPinnedTabs);
+			body.style.setProperty(WIDTH_VAR, `${compactTabWidth}px`);
 		}
+	}
 
-		const fieldName = iconize.settings?.iconInFrontmatterFieldName ?? "icon";
-		const frontmatter =
-			this.plugin.app.metadataCache.getFileCache(file)?.frontmatter;
-		return frontmatter?.[fieldName] != null;
+	/** Remove the enable class + width variable from every window. */
+	clear(): void {
+		for (const body of this.bodies()) {
+			body.classList.remove(ENABLE_CLASS);
+			body.style.removeProperty(WIDTH_VAR);
+		}
+	}
+
+	/**
+	 * Every open window's `<body>` — the main window plus any popouts. Popout
+	 * leaves live in their own document, so we reach each via a leaf's view
+	 * element (`containerEl.ownerDocument`), all public DOM/API.
+	 */
+	private bodies(): Set<HTMLElement> {
+		const bodies = new Set<HTMLElement>([activeDocument.body]);
+		this.plugin.app.workspace.iterateAllLeaves((leaf) => {
+			bodies.add(leaf.view.containerEl.ownerDocument.body);
+		});
+		return bodies;
 	}
 }

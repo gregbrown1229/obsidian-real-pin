@@ -9,9 +9,10 @@ export interface RealPinSettings {
 	confirmBeforeClose: boolean;
 
 	/**
-	 * When true, pinned tabs that have an Iconize-assigned icon shrink to
-	 * icon-only (title hidden). Requires the Iconize plugin with its "Toggle icon
-	 * in tabs" setting on; otherwise the feature stays inert.
+	 * When true, pinned tabs shrink to icon-only (title hidden). Pure CSS, keyed
+	 * on Obsidian's own pin element — no dependency on any other plugin. A pinned
+	 * tab with an Iconize (or similar) icon reads as that icon; one without shows
+	 * Obsidian's default file icon.
 	 */
 	compactPinnedTabs: boolean;
 
@@ -34,17 +35,6 @@ export const DEFAULT_SETTINGS: RealPinSettings = {
 	compactPinnedTabs: false,
 	compactTabWidth: COMPACT_WIDTH_DEFAULT,
 };
-
-/** Iconize's community-plugin id; its presence gates the compact feature. */
-const ICONIZE_ID = "obsidian-icon-folder";
-
-/**
- * The sliver of Iconize we read in settings: only its tab-icon switch, so we can
- * hint the user when Iconize is installed but wouldn't be painting tab icons.
- */
-interface IconizeForSettings {
-	settings?: { iconInTabsEnabled?: boolean };
-}
 
 export class RealPinSettingTab extends PluginSettingTab {
 	private plugin: RealPinPlugin;
@@ -77,36 +67,21 @@ export class RealPinSettingTab extends PluginSettingTab {
 	}
 
 	private addCompactPinnedTabsSetting(containerEl: HTMLElement): void {
-		// `getPlugin` returns the instance only when Iconize is installed AND
-		// enabled — exactly the gate we want. Reached via a narrow cast, mirroring
-		// how `main.ts` casts `app` to reach `commands`.
-		const iconize = (
-			this.app as unknown as {
-				plugins: { getPlugin(id: string): unknown };
-			}
-		).plugins.getPlugin(ICONIZE_ID) as IconizeForSettings | null;
-
-		let desc =
-			"Pinned tabs with an Iconize icon shrink to icon-only (hover shows the title). " +
-			"Icon-less pinned tabs keep their title. Takes effect immediately.";
-		if (!iconize) {
-			desc += " Requires the Iconize plugin.";
-		} else if (iconize.settings?.iconInTabsEnabled === false) {
-			desc += " Enable Iconize's “Toggle icon in tabs” for this to apply.";
-		}
-
 		new Setting(containerEl)
 			.setName("Compact pinned tabs")
-			.setDesc(desc)
+			.setDesc(
+				"Shrink pinned tabs to icon-only (hover shows the title). For a row of " +
+					"distinct icons, assign them with a plugin like Iconize — a pinned tab " +
+					"without one shows Obsidian's default file icon. Takes effect immediately.",
+			)
 			.addToggle((toggle) =>
 				toggle
-					.setDisabled(!iconize)
 					.setValue(this.plugin.settings.compactPinnedTabs)
 					.onChange(async (value) => {
 						this.plugin.settings.compactPinnedTabs = value;
 						await this.plugin.saveSettings();
 						// Apply live (undebounced) so the toggle feels instant.
-						this.plugin.compactTabs.refresh();
+						this.plugin.compactTabs.apply();
 					}),
 			);
 
@@ -124,7 +99,7 @@ export class RealPinSettingTab extends PluginSettingTab {
 						this.plugin.settings.compactTabWidth = value;
 						await this.plugin.saveSettings();
 						// Live update the CSS variable the stylesheet reads.
-						this.plugin.compactTabs.applyWidth();
+						this.plugin.compactTabs.apply();
 					}),
 			);
 	}

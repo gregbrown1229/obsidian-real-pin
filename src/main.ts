@@ -26,11 +26,11 @@ export default class RealPinPlugin extends Plugin {
 		this.addSettingTab(new RealPinSettingTab(this.app, this));
 		this.patchCloseCommand();
 
-		// Compact pinned tabs: start once the layout is ready (so tab headers
-		// exist for the first paint), and strip our markers on unload.
+		// Compact pinned tabs: start once the layout is ready (so any open popout
+		// windows are picked up). `start()` registers its own teardown, reverting
+		// every window on unload.
 		this.compactTabs = new CompactPinnedTabs(this);
 		this.app.workspace.onLayoutReady(() => this.compactTabs.start());
-		this.register(() => this.compactTabs.clearAll());
 	}
 
 	async loadSettings(): Promise<void> {

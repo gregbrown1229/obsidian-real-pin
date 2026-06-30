@@ -1,8 +1,13 @@
 // End-to-end test of the compact-pinned-tabs feature against a real, headless
-// Obsidian with Iconize installed. This is the automated form of the manual
-// in-Obsidian checklist: it proves the real tab DOM, the Iconize gate, the
-// marker class + aria-label, that styles.css caps the width, and that Iconize's
-// `allIconsLoaded` event makes a tab compact without a click (the startup race).
+// Obsidian. The feature is pure CSS: Obsidian renders a
+// `.workspace-tab-header-status-icon.mod-pinned` element inside a pinned tab's
+// header, the bundled styles.css selects it with `:has(...)` (gated on a body
+// class the plugin toggles), and pinned tabs shrink to icon-only. There is no
+// per-tab JavaScript to test — so this asserts the real behavior end to end:
+// that pinning shrinks a tab and hides its title, that an unpinned tab is
+// untouched, that pin/unpin is reactive with no marker plumbing, that the width
+// slider drives the cap, that Obsidian keeps the title accessible, and that the
+// toggle fully reverts.
 //
 // Run with `npm run test:e2e` (needs a display — CI wraps it in `xvfb-run`).
 // `npm run build` must have run first so the plugin's main.js exists.
@@ -13,49 +18,44 @@ import { launchObsidian } from "./obsidian-harness.mjs";
 
 const VAULT = fileURLToPath(new URL("./vault", import.meta.url));
 
+/** The compact width we configure, asserted against the resolved CSS cap. */
+const WIDTH = 80;
+
 let obs;
 
 before(async () => {
 	obs = await launchObsidian({ vault: VAULT });
 
-	// Arrange once: assign a real Iconize icon to with-icon.md (the way the
-	// right-click menu does — this is what `getIconNameFromPath` reads), enable
-	// the feature, and open both fixture notes in pinned tabs. Leaves are stashed
-	// on a page global so later (serializable-only) reads can refer back to them.
+	// Arrange once: enable the feature at a known width, then open two fixture
+	// notes — one pinned, one not. No icon assignment needed; the feature compacts
+	// every pinned tab regardless of icon. Leaves are stashed on a page global so
+	// later (serializable-only) reads can refer back to them.
 	await obs.evalInApp(`
 		const app = window.app;
-		const ic = app.plugins.plugins['obsidian-icon-folder'];
-		for (let i = 0; i < 100; i++) {
-			if (typeof ic.addFolderIcon === 'function' && typeof ic.getIconNameFromPath === 'function') break;
-			await new Promise((r) => setTimeout(r, 100));
-		}
-		if (ic.settings) ic.settings.iconInTabsEnabled = true;
-		await ic.addFolderIcon('with-icon.md', '🏠');
-		if (typeof ic.saveIconFolderData === 'function') await ic.saveIconFolderData();
-
 		const rp = app.plugins.plugins['real-pin'];
 		rp.settings.compactPinnedTabs = true;
+		rp.settings.compactTabWidth = ${WIDTH};
+		rp.compactTabs.apply();
 
-		const openPinned = async (path) => {
+		const open = async (path, pin) => {
 			const file = app.vault.getAbstractFileByPath(path);
 			const leaf = app.workspace.getLeaf('tab');
 			await leaf.openFile(file);
-			leaf.setPinned(true);
+			if (pin) leaf.setPinned(true);
 			return leaf;
 		};
 
 		window.__rp = {
 			rp,
-			withIcon: await openPinned('with-icon.md'),
-			noIcon: await openPinned('no-icon.md'),
+			pinned: await open('with-icon.md', true),
+			unpinned: await open('no-icon.md', false),
 		};
 
-		// Reconcile until the marker lands (the icon is already assigned, so this
-		// is deterministic).
+		// Wait for Obsidian to render the pin element the CSS keys on, so reads are
+		// deterministic. (Pure CSS applies synchronously once it's in the DOM.)
 		for (let i = 0; i < 60; i++) {
-			rp.compactTabs.refresh();
-			if (window.__rp.withIcon.tabHeaderEl.classList.contains('real-pin-compact-tab')) break;
-			await new Promise((r) => setTimeout(r, 100));
+			if (window.__rp.pinned.tabHeaderEl.querySelector('.workspace-tab-header-status-icon.mod-pinned')) break;
+			await new Promise((r) => setTimeout(r, 50));
 		}
 		return true;
 	`);
@@ -65,97 +65,126 @@ after(async () => {
 	await obs?.close();
 });
 
-/** Read the marker class, aria-label, and title visibility off a stashed leaf's tab header. */
+/** Read the rendered state of a stashed leaf's tab header. */
 const readTab = (leafKey) =>
 	obs.evalInApp(`
 		const h = window.__rp.${leafKey}.tabHeaderEl;
 		const title = h.querySelector('.workspace-tab-header-inner-title');
+		const cs = getComputedStyle(h);
 		return {
-			marker: h.classList.contains('real-pin-compact-tab'),
-			ariaLabel: h.getAttribute('aria-label'),
+			isPinned: !!h.querySelector('.workspace-tab-header-status-icon.mod-pinned'),
 			titleDisplay: title ? getComputedStyle(title).display : '(no title el)',
+			maxWidth: cs.maxWidth,
+			width: window.__rp.${leafKey}.tabHeaderEl.getBoundingClientRect().width,
+			ariaLabel: h.getAttribute('aria-label'),
 		};
 	`);
 
-test("a pinned note with an Iconize icon compacts to icon-only", async () => {
-	const r = await readTab("withIcon");
-	assert.equal(r.marker, true, "marker class should be applied");
+test("the body class arms the feature; pure CSS does the rest", async () => {
+	const armed = await obs.evalInApp(
+		`return activeDocument.body.classList.contains('real-pin-compact-pinned-tabs');`,
+	);
+	assert.equal(armed, true, "enabling the setting adds the body gate class");
+});
+
+test("a pinned tab compacts to icon-only at the configured width", async () => {
+	const r = await readTab("pinned");
+	assert.equal(r.isPinned, true, "fixture tab should be pinned");
 	assert.equal(r.titleDisplay, "none", "styles.css should hide the title");
-	assert.equal(r.ariaLabel, "with-icon", "hidden title should be re-exposed as aria-label");
+	assert.equal(
+		parseFloat(r.maxWidth),
+		WIDTH,
+		`width should be capped to the configured ${WIDTH}px`,
+	);
 });
 
-test("a pinned note without an icon stays full-size", async () => {
-	const r = await readTab("noIcon");
-	assert.equal(r.marker, false, "no marker on an icon-less tab");
+test("an unpinned tab is left full-size", async () => {
+	const r = await readTab("unpinned");
+	assert.equal(r.isPinned, false, "fixture tab should be unpinned");
 	assert.equal(r.titleDisplay, "block", "title stays visible");
-	assert.equal(r.ariaLabel, null, "no aria-label added");
+	assert.ok(
+		parseFloat(r.maxWidth) > WIDTH,
+		`unpinned tab should not get the compact cap (got ${r.maxWidth})`,
+	);
 });
 
-test("a compacted tab collapses to the capped width, narrower than a full tab", async () => {
-	// Obsidian grows tabs to fill and won't size them to content, so styles.css
-	// caps the width via --real-pin-compact-tab-width. Assert the compacted tab
-	// respects that cap (read from computed style — no hard-coded px) and is
-	// clearly narrower than the non-compacted icon-less tab.
+test("a compacted tab is clearly narrower than a full one", async () => {
+	const pinned = await readTab("pinned");
+	const unpinned = await readTab("unpinned");
+	assert.ok(
+		pinned.width < unpinned.width,
+		`compacted tab (${pinned.width}) should be narrower than a full tab (${unpinned.width})`,
+	);
+});
+
+test("the width slider drives the cap live", async () => {
+	const wide = WIDTH + 40;
 	const r = await obs.evalInApp(`
-		const compact = window.__rp.withIcon.tabHeaderEl.getBoundingClientRect().width;
-		const full = window.__rp.noIcon.tabHeaderEl.getBoundingClientRect().width;
-		const cap = parseFloat(getComputedStyle(window.__rp.withIcon.tabHeaderEl).maxWidth);
-		return { compact, full, cap };
+		const rp = window.__rp.rp;
+		rp.settings.compactTabWidth = ${wide};
+		rp.compactTabs.apply();
+		const h = window.__rp.pinned.tabHeaderEl;
+		return getComputedStyle(h).maxWidth;
 	`);
-	assert.ok(Number.isFinite(r.cap), "compacted tab should have a finite max-width cap");
-	assert.ok(r.compact <= r.cap + 1, `compacted width ${r.compact} should respect the cap ${r.cap}`);
-	assert.ok(r.compact < r.full, `compacted tab (${r.compact}) should be narrower than a full tab (${r.full})`);
+	assert.equal(parseFloat(r), wide, `cap should follow the slider to ${wide}px`);
+	// Restore for any later assertions.
+	await obs.evalInApp(
+		`const rp = window.__rp.rp; rp.settings.compactTabWidth = ${WIDTH}; rp.compactTabs.apply(); return true;`,
+	);
 });
 
-test("Iconize's allIconsLoaded event compacts the tab with no click (startup-race fix)", async () => {
-	// Strip our marker to simulate the moment before Iconize's data is in, then
-	// fire Iconize's readiness event. Our listener must reconcile on its own —
-	// no manual refresh, no tab click.
+test("pin/unpin is reactive with no per-tab JavaScript", async () => {
+	// Unpin removes Obsidian's `.mod-pinned` element, so the `:has()` rule stops
+	// matching and the tab expands — and re-pinning re-matches. No marker class,
+	// no listener: the CSS reacts to the DOM Obsidian itself changes.
 	const r = await obs.evalInApp(`
-		const app = window.app;
-		const h = window.__rp.withIcon.tabHeaderEl;
-		h.classList.remove('real-pin-compact-tab');
-		h.removeAttribute('aria-label');
-		const before = h.classList.contains('real-pin-compact-tab');
-		app.plugins.plugins['obsidian-icon-folder'].getEventEmitter().emit('allIconsLoaded');
-		for (let i = 0; i < 60; i++) {
-			if (h.classList.contains('real-pin-compact-tab')) break;
-			await new Promise((r) => setTimeout(r, 50));
-		}
-		return { before, after: h.classList.contains('real-pin-compact-tab') };
-	`);
-	assert.equal(r.before, false, "marker should start cleared");
-	assert.equal(r.after, true, "allIconsLoaded should re-compact the tab via our listener");
-});
-
-test("unpinning expands and re-pinning re-compacts, with no tab switch", async () => {
-	// Pin/unpin fires only a per-leaf `pinned-change` (no workspace event), so
-	// without wiring it the tab wouldn't update until you click another tab.
-	const r = await obs.evalInApp(`
-		const leaf = window.__rp.withIcon;
-		const has = () => leaf.tabHeaderEl.classList.contains('real-pin-compact-tab');
-		const waitFor = async (want) => { for (let i = 0; i < 50; i++) { if (has() === want) break; await new Promise((r) => setTimeout(r, 50)); } return has(); };
-		const start = has();
+		const leaf = window.__rp.pinned;
+		const titleDisplay = () => {
+			const t = leaf.tabHeaderEl.querySelector('.workspace-tab-header-inner-title');
+			return getComputedStyle(t).display;
+		};
+		const waitFor = async (want) => { for (let i = 0; i < 50; i++) { if (titleDisplay() === want) break; await new Promise((r) => setTimeout(r, 50)); } return titleDisplay(); };
+		const start = titleDisplay();
 		leaf.setPinned(false);
-		const afterUnpin = await waitFor(false);
+		const afterUnpin = await waitFor('block');
 		leaf.setPinned(true);
-		const afterPin = await waitFor(true);
-		return { start, afterUnpin, afterPin };
+		const afterRepin = await waitFor('none');
+		return { start, afterUnpin, afterRepin };
 	`);
-	assert.equal(r.start, true, "tab starts compacted");
-	assert.equal(r.afterUnpin, false, "unpinning should expand the tab");
-	assert.equal(r.afterPin, true, "re-pinning should compact again without switching tabs");
+	assert.equal(r.start, "none", "starts compacted (title hidden)");
+	assert.equal(r.afterUnpin, "block", "unpinning expands the tab (title shown)");
+	assert.equal(r.afterRepin, "none", "re-pinning compacts again (title hidden)");
 });
 
-test("turning the setting off reverts compacted tabs", async () => {
-	await obs.evalInApp(`
+test("Obsidian keeps the title accessible, so hiding the visible one is safe", async () => {
+	// We hide the visible title with CSS; the accessible name must survive. It
+	// does, because Obsidian sets the tab header's own aria-label to the title
+	// (and shows it as a hover tooltip) — we never touch that.
+	const r = await readTab("pinned");
+	assert.equal(
+		r.ariaLabel,
+		"with-icon",
+		"Obsidian's header aria-label still exposes the title to screen readers",
+	);
+});
+
+test("turning the setting off reverts every tab", async () => {
+	const r = await obs.evalInApp(`
 		const rp = window.__rp.rp;
 		rp.settings.compactPinnedTabs = false;
-		rp.compactTabs.refresh();
-		return true;
+		rp.compactTabs.apply();
+		const h = window.__rp.pinned.tabHeaderEl;
+		const t = h.querySelector('.workspace-tab-header-inner-title');
+		return {
+			armed: activeDocument.body.classList.contains('real-pin-compact-pinned-tabs'),
+			titleDisplay: getComputedStyle(t).display,
+			maxWidth: getComputedStyle(h).maxWidth,
+		};
 	`);
-	const r = await readTab("withIcon");
-	assert.equal(r.marker, false, "marker removed when the feature is off");
+	assert.equal(r.armed, false, "body gate class removed");
 	assert.equal(r.titleDisplay, "block", "title restored");
-	assert.equal(r.ariaLabel, null, "aria-label removed");
+	assert.ok(
+		parseFloat(r.maxWidth) > WIDTH,
+		`compact cap lifted (got ${r.maxWidth})`,
+	);
 });

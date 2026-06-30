@@ -29,22 +29,31 @@ vs the newer `setDestructive()`.
 ## Code standards
 
 - **Strict TypeScript, no `any`.** `tsconfig` is `strict`. Type the real thing.
-- **Internal/untyped Obsidian APIs** (e.g. `app.commands`, `leaf.tabHeaderEl`,
-  `app.plugins`) are reached through a **narrow `as unknown as { … }` cast that
-  models only the sliver you touch** — never a blanket `any`. See `main.ts`
-  (`commands`) and `compactPinnedTabs.ts` (`tabHeaderEl`, `plugins`).
-- **Pure logic is extracted and unit-tested.** Decision logic goes in an
-  `obsidian`-free module (e.g. `src/compactPolicy.ts`) with erasable-syntax-only
-  exports, and gets a `node --test` truth-table test in `scripts/*.test.mjs`.
-  The tested code is the shipped code — the controller imports the same module.
-  (Tests import the `.ts` source directly via Node's native type-stripping;
-  requires Node ≥ 22.18, which CI and the dev toolchain use.)
+- **Prefer the platform; write the least code that works.** If CSS or a built-in
+  Obsidian affordance can do the job, don't reach for JavaScript. Compact-pinned-
+  tabs is **pure CSS**, keyed on Obsidian's own pin element
+  (`:has(.workspace-tab-header-status-icon.mod-pinned)`); an earlier event-driven
+  controller that reconciled a marker class on every tab was deleted in favor of
+  it, removing an entire class of pin/unpin and paint-timing races. Less surface,
+  fewer bugs.
+- **Internal/untyped Obsidian APIs** (e.g. `app.commands`) are reached through a
+  **narrow `as unknown as { … }` cast that models only the sliver you touch** —
+  never a blanket `any`. See `main.ts` (`commands`). Prefer public API first: the
+  compact-tabs controller reaches popout `<body>` elements via the public
+  `leaf.view.containerEl.ownerDocument`, no cast at all.
+- **When there's real decision logic, extract and unit-test it.** Put it in an
+  `obsidian`-free, erasable-syntax-only module and give it a `node --test`
+  truth-table in `scripts/*.test.mjs`, importing the `.ts` source directly via
+  Node's native type-stripping (Node ≥ 22.18). Keep the tested code the shipped
+  code. (No module needs this today — the close-command logic is a few live
+  branches and compact-tabs is pure CSS — but reach for it the moment a feature
+  grows a non-trivial predicate.)
 - **Behavior that only exists inside Obsidian gets an end-to-end test.** Anything
-  the unit gate can't reach — real tab DOM, cross-plugin integration (Iconize),
-  pin/unpin, that `styles.css` actually applies — goes in `test/e2e/*.e2e.mjs`,
-  which drives a real headless Obsidian over CDP (see the README). E2E is the
-  automated form of manual checklists; prefer it over "I clicked around and it
-  worked." Keep it in its own workflow, off the fast `check` gate.
+  the unit gate can't reach — real tab DOM, pin/unpin, that `styles.css` actually
+  applies and reverts — goes in `test/e2e/*.e2e.mjs`, which drives a real headless
+  Obsidian over CDP (see the README). E2E is the automated form of manual
+  checklists; prefer it over "I clicked around and it worked." Keep it in its own
+  workflow, off the fast `check` gate.
 - **Clean lifecycle / teardown.** Wire listeners and patches through
   `registerEvent` / `register` so they auto-unwind on unload. Anything that
   mutates the DOM must fully reverse on teardown, setting-off, and dependency
@@ -52,11 +61,15 @@ vs the newer `setDestructive()`.
 - **Don't touch other plugins' nodes.** Integrate by reading their public-ish
   state and degrade gracefully (`typeof` guards, inert fallback) when an optional
   dependency is missing or changes shape. Features are off by default and opt-in.
-- **Accessibility is not optional.** If you hide text, re-expose it (e.g.
-  `aria-label`). Keep hit targets (close button, context menu) reachable.
-- **Styles live in `styles.css`**, scoped under a feature-specific marker class —
-  never injected via `innerHTML` or inline `<style>`, and zero visual effect
-  until the feature applies the marker.
+- **Accessibility is not optional.** If you hide text, make sure it's still
+  exposed — re-expose it yourself (e.g. `aria-label`), or confirm the platform
+  already does (compact-tabs hides the visible title, but Obsidian's own header
+  `aria-label` + hover tooltip keep the name available). Keep hit targets (close
+  button, context menu) reachable.
+- **Styles live in `styles.css`**, scoped under a feature gate — a body class the
+  plugin toggles and/or Obsidian's own state via `:has()` — never injected via
+  `innerHTML` or inline `<style>`, and zero visual effect until the feature is
+  enabled.
 
 ## Packaging stays in sync
 
