@@ -130,6 +130,21 @@ test("dragging an ungrouped tab into the group's run joins it", async () => {
 	assert.equal(joined, true, "c joined the group after landing inside its run");
 });
 
+test("live groups are persisted so they survive a reload", async () => {
+	const persisted = await obs.evalInApp(`
+		await new Promise(r => setTimeout(r, 600)); // let the debounced save fire
+		const groups = window.__tg.rp.getLiveGroups();
+		const g = groups.find(x => x.id === window.__tg.groupId);
+		return {
+			count: groups.length,
+			found: !!g,
+			hasMembers: !!g && g.memberIds.includes(window.__tg.a.id) && g.memberIds.includes(window.__tg.b.id),
+		};
+	`);
+	assert.equal(persisted.found, true, "the group is written to plugin data");
+	assert.equal(persisted.hasMembers, true, "its members are persisted");
+});
+
 test("disabling the feature reverts every tab and removes chips", async () => {
 	const r = await obs.evalInApp(`
 		const rp = window.__tg.rp;

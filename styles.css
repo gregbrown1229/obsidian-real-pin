@@ -145,3 +145,34 @@ body.real-pin-tab-groups .real-pin-group-chip-name {
 	text-overflow: ellipsis;
 	max-width: 12ch;
 }
+
+/* Color picker swatches (group edit modal) + the group dot in the picker. */
+.real-pin-color-swatches {
+	display: flex;
+	gap: var(--size-4-2);
+	flex-wrap: wrap;
+}
+.real-pin-color-swatch {
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	background-color: var(--rp-c, var(--color-base-50));
+	border: 2px solid transparent;
+	cursor: pointer;
+}
+.real-pin-color-swatch.is-selected {
+	border-color: var(--text-normal);
+	box-shadow: 0 0 0 2px var(--background-primary);
+}
+.real-pin-color-swatch.is-dot {
+	width: 10px;
+	height: 10px;
+	margin-right: var(--size-4-2);
+	display: inline-block;
+	vertical-align: middle;
+	cursor: default;
+}
+.real-pin-suggest-group {
+	display: flex;
+	align-items: center;
+}

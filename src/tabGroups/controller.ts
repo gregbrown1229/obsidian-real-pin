@@ -14,6 +14,7 @@ import {
 	setHeaderAttrs,
 	updateChip,
 } from "./overlay";
+import { GroupEditModal, GroupSuggestModal } from "./modals";
 
 /**
  * Obsidian models a leaf's stable id and its tab-header element, but neither is
@@ -61,12 +62,23 @@ export class TabGroupController {
 	private prevOrder = new Map<WorkspaceParent, string[]>();
 	private observers: MutationObserver[] = [];
 	private scheduled: number | null = null;
+	private saveTimer: number | null = null;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
 	}
 
 	start(): void {
+		// Rebind groups persisted last session; reconcile drops any whose member
+		// leaves no longer exist (matched by the stable leaf id).
+		this.groups = this.plugin.getLiveGroups().map((g) => ({
+			id: g.id,
+			name: g.name,
+			color: g.color,
+			collapsed: g.collapsed,
+			memberIds: [...g.memberIds],
+		}));
+
 		const ws = this.plugin.app.workspace;
 		this.plugin.registerEvent(ws.on("layout-change", () => this.schedule()));
 		this.plugin.registerEvent(ws.on("active-leaf-change", () => this.schedule()));
@@ -131,6 +143,80 @@ export class TabGroupController {
 		this.reconcile();
 	}
 
+	renameGroup(groupId: string, name: string): void {
+		const g = this.groups.find((x) => x.id === groupId);
+		if (!g) return;
+		g.name = name;
+		this.reconcile();
+	}
+
+	recolorGroup(groupId: string, color: GroupColor): void {
+		const g = this.groups.find((x) => x.id === groupId);
+		if (!g) return;
+		g.color = color;
+		this.reconcile();
+	}
+
+	/** Open the name/color editor for a group and apply the result. */
+	editGroup(groupId: string): void {
+		const g = this.groups.find((x) => x.id === groupId);
+		if (!g) return;
+		void new GroupEditModal(this.plugin.app, {
+			name: g.name,
+			color: g.color,
+		})
+			.ask()
+			.then((result) => {
+				if (!result) return;
+				const live = this.groups.find((x) => x.id === groupId);
+				if (!live) return;
+				live.name = result.name;
+				live.color = result.color;
+				this.reconcile();
+			});
+	}
+
+	editActiveGroup(): void {
+		const leaf = this.activeManagedLeaf();
+		const g = leaf
+			? this.groups.find((x) => x.memberIds.includes(id(leaf)))
+			: undefined;
+		if (g) this.editGroup(g.id);
+		else new Notice("The active tab isn't in a group.");
+	}
+
+	/** Move a leaf into a group (removing it from any other). */
+	addLeafToGroup(leafId: string, groupId: string): void {
+		const g = this.groups.find((x) => x.id === groupId);
+		if (!g) return;
+		for (const other of this.groups) {
+			if (other !== g) {
+				other.memberIds = other.memberIds.filter((m) => m !== leafId);
+			}
+		}
+		if (!g.memberIds.includes(leafId)) g.memberIds.push(leafId);
+		this.groups = this.groups.filter((x) => x.memberIds.length > 0);
+		this.reconcile();
+	}
+
+	/** Prompt for which group to add the active tab to (or make a new one). */
+	addActiveLeafToGroupPrompt(): void {
+		const leaf = this.activeManagedLeaf();
+		if (!leaf) {
+			new Notice("Focus a tab to add it to a group.");
+			return;
+		}
+		const leafId = id(leaf);
+		if (this.groups.length === 0) {
+			this.createGroup([leafId]);
+			return;
+		}
+		new GroupSuggestModal(this.plugin.app, this.groups, (choice) => {
+			if (choice.kind === "new") this.createGroup([leafId]);
+			else this.addLeafToGroup(leafId, choice.group.id);
+		}).open();
+	}
+
 	/** Snapshot for tests/inspection. */
 	getGroups(): readonly TabGroup[] {
 		return this.groups;
@@ -145,6 +231,23 @@ export class TabGroupController {
 			this.scheduled = null;
 			this.reconcile();
 		}, 30);
+	}
+
+	/** Persist live groups (debounced) so they survive a reload. */
+	private schedulePersist(): void {
+		if (this.saveTimer !== null) return;
+		this.saveTimer = window.setTimeout(() => {
+			this.saveTimer = null;
+			void this.plugin.saveLiveGroups(
+				this.groups.map((g) => ({
+					id: g.id,
+					name: g.name,
+					color: g.color,
+					collapsed: g.collapsed,
+					memberIds: [...g.memberIds],
+				})),
+			);
+		}, 400);
 	}
 
 	private reconcile(): void {
@@ -207,6 +310,7 @@ export class TabGroupController {
 		}
 
 		this.observe(strips);
+		this.schedulePersist();
 	}
 
 	private renderStrip(
@@ -278,6 +382,12 @@ export class TabGroupController {
 		);
 		menu.addItem((i) =>
 			i
+				.setTitle("Edit name and color…")
+				.setIcon("pencil")
+				.onClick(() => this.editGroup(groupId)),
+		);
+		menu.addItem((i) =>
+			i
 				.setTitle("Ungroup")
 				.setIcon("ungroup")
 				.onClick(() => this.ungroup(groupId)),
@@ -345,6 +455,10 @@ export class TabGroupController {
 		if (this.scheduled !== null) {
 			window.clearTimeout(this.scheduled);
 			this.scheduled = null;
+		}
+		if (this.saveTimer !== null) {
+			window.clearTimeout(this.saveTimer);
+			this.saveTimer = null;
 		}
 	}
 }

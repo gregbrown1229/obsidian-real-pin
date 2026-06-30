@@ -4,7 +4,11 @@ import { ConfirmCloseModal } from "./ConfirmCloseModal";
 import { CompactPinnedTabs } from "./compactPinnedTabs";
 import { TabGroupController } from "./tabGroups/controller";
 import { migrateData } from "./tabGroups/model";
-import type { PersistedData } from "./tabGroups/model";
+import type {
+	PersistedData,
+	PersistedLiveGroup,
+	SavedTabGroup,
+} from "./tabGroups/model";
 import {
 	DEFAULT_SETTINGS,
 	RealPinSettings,
@@ -48,6 +52,16 @@ export default class RealPinPlugin extends Plugin {
 			callback: () => this.tabGroups.createGroupFromActiveLeaf(),
 		});
 		this.addCommand({
+			id: "add-tab-to-group",
+			name: "Add active tab to group",
+			callback: () => this.tabGroups.addActiveLeafToGroupPrompt(),
+		});
+		this.addCommand({
+			id: "edit-tab-group",
+			name: "Edit the active tab's group (name and color)",
+			callback: () => this.tabGroups.editActiveGroup(),
+		});
+		this.addCommand({
 			id: "toggle-tab-group-collapse",
 			name: "Toggle collapse of the active tab's group",
 			callback: () => this.tabGroups.toggleCollapseActive(),
@@ -61,6 +75,26 @@ export default class RealPinPlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		this.data.settings = this.settings;
+		await this.saveData(this.data);
+	}
+
+	// Tab-group persistence. Live groups are rebound to leaves on reload; saved
+	// groups are the user's reopenable library. Both share the one data file.
+	getLiveGroups(): PersistedLiveGroup[] {
+		return this.data.liveGroups;
+	}
+
+	async saveLiveGroups(groups: PersistedLiveGroup[]): Promise<void> {
+		this.data.liveGroups = groups;
+		await this.saveData(this.data);
+	}
+
+	getSavedGroups(): SavedTabGroup[] {
+		return this.data.savedGroups;
+	}
+
+	async saveSavedGroups(groups: SavedTabGroup[]): Promise<void> {
+		this.data.savedGroups = groups;
 		await this.saveData(this.data);
 	}
 
