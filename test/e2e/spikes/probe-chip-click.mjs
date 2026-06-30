@@ -32,17 +32,17 @@ try {
 		const flag = () => (rp.tabGroups.getGroups().find(g=>g.id===gid)||{}).collapsed;
 		const stripAfter = a.tabHeaderEl.parentElement;
 		out.stripIdentitySame = stripBefore === stripAfter;
-		const chips = [...stripAfter.querySelectorAll('.real-pin-group-chip')];
-		out.chipsAfterInStrip = chips.length;
+		out.chipsAfterInStrip = stripAfter.querySelectorAll('.real-pin-group-chip').length;
 
-		// click the FIRST chip
-		chips[0].click(); await new Promise(r=>setTimeout(r,150));
-		out.firstChipWorks = flag();
-		if (flag()) { rp.tabGroups.toggleCollapse(gid); await new Promise(r=>setTimeout(r,120)); }
+		const pointerdown = (el) => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, view: window }));
 
-		// click the SECOND chip (if any)
-		if (chips[1]) { chips[1].click(); await new Promise(r=>setTimeout(r,150)); out.secondChipWorks = flag(); }
-		out.dbg = window.__rpdbg;
+		out.before = flag();
+		pointerdown(stripAfter.querySelector('.real-pin-group-chip'));
+		await new Promise(r=>setTimeout(r,200));
+		out.afterPointerDown1 = flag();
+		pointerdown(stripAfter.querySelector('.real-pin-group-chip'));
+		await new Promise(r=>setTimeout(r,200));
+		out.afterPointerDown2 = flag();
 		return out;
 	`);
 } finally {

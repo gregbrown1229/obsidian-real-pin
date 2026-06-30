@@ -73,8 +73,8 @@ export class TabGroupController {
 	private saveTimer: number | null = null;
 	/** Signature of the last persisted group state, to avoid redundant writes. */
 	private lastSig = "";
-	/** Strips we've already wired delegated chip listeners onto. */
-	private readonly delegated = new WeakSet<HTMLElement>();
+	/** Documents we've already wired delegated chip listeners onto. */
+	private readonly delegatedDocs = new WeakSet<Document>();
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -575,7 +575,7 @@ export class TabGroupController {
 			newTagged.add(header);
 		}
 
-		this.attachDelegation(strip);
+		this.attachDelegation(strip.ownerDocument);
 
 		for (const g of groups) {
 			const firstId = order.find((m) => groupOf.get(m) === g.id);
@@ -606,21 +606,27 @@ export class TabGroupController {
 	}
 
 	/**
-	 * Wire chip interactions via ONE capture-phase delegated listener per strip,
-	 * keyed off `data-rp-group-id`. Survives Obsidian cloning the chip (lost
-	 * per-element listeners) and beats Obsidian's own bubble-phase tab handlers.
+	 * Wire chip interactions via ONE capture-phase delegated listener per window
+	 * document, keyed off `data-rp-group-id`. Document-level capture runs before
+	 * any of Obsidian's descendant handlers (so it can't be pre-empted), and a
+	 * data attribute survives Obsidian cloning the chip (per-element listeners
+	 * don't). We toggle on pointerdown, NOT click: a real press makes Obsidian
+	 * re-render the strip (replacing our chip), so mousedown/mouseup land on
+	 * different elements and no `click` fires on the chip — pointerdown fires on
+	 * the chip first, before any re-render.
 	 */
-	private attachDelegation(strip: HTMLElement): void {
-		if (this.delegated.has(strip)) return;
-		this.delegated.add(strip);
+	private attachDelegation(doc: Document): void {
+		if (this.delegatedDocs.has(doc)) return;
+		this.delegatedDocs.add(doc);
 		const chipOf = (e: Event): HTMLElement | null => {
 			const target = e.target as HTMLElement | null;
 			return target?.closest<HTMLElement>(".real-pin-group-chip") ?? null;
 		};
 		this.plugin.registerDomEvent(
-			strip,
-			"click",
+			doc,
+			"pointerdown",
 			(e) => {
+				if (e.button !== 0) return;
 				const chip = chipOf(e);
 				if (!chip?.dataset.rpGroupId) return;
 				e.preventDefault();
@@ -630,7 +636,7 @@ export class TabGroupController {
 			{ capture: true },
 		);
 		this.plugin.registerDomEvent(
-			strip,
+			doc,
 			"contextmenu",
 			(e) => {
 				const chip = chipOf(e);
@@ -642,7 +648,7 @@ export class TabGroupController {
 			{ capture: true },
 		);
 		this.plugin.registerDomEvent(
-			strip,
+			doc,
 			"keydown",
 			(e) => {
 				if (e.key !== "Enter" && e.key !== " ") return;
