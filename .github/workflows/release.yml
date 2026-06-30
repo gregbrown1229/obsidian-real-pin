@@ -35,7 +35,13 @@ jobs:
             - name: Attest build provenance
               uses: actions/attest-build-provenance@v4
               with:
-                  subject-path: main.js
+                  # Attest every file the release ships, so users can verify the
+                  # provenance of each artifact they install — not just main.js.
+                  # styles.css now carries the whole compact-tabs feature.
+                  subject-path: |
+                      main.js
+                      manifest.json
+                      styles.css
 
             - name: Create release
               env:
