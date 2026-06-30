@@ -51,3 +51,97 @@ body.real-pin-compact-pinned-tabs
 	 * it isn't doubled. */
 	margin: 0;
 }
+
+/*
+ * Real Pin — Chrome-style tab groups.
+ *
+ * Gated on the `real-pin-tab-groups` body class the controller toggles, so this
+ * is inert until the feature is enabled. The controller tags member tab headers
+ * with `data-rp-group` / `data-rp-color` / `data-rp-pos` / `data-rp-collapsed`
+ * and inserts a `.real-pin-group-chip` before each group's first member; CSS
+ * draws the colored band, end-rounding, collapse, and the chip. Per-color rules
+ * resolve a single `--rp-c` from Obsidian's theme palette so the rest is shared.
+ */
+
+/* Resolve the group accent color (member headers and the chip both carry it). */
+body.real-pin-tab-groups [data-rp-color="grey"] {
+	--rp-c: var(--color-base-60, #9aa0a6);
+}
+body.real-pin-tab-groups [data-rp-color="blue"] {
+	--rp-c: var(--color-blue, #4b8bf5);
+}
+body.real-pin-tab-groups [data-rp-color="red"] {
+	--rp-c: var(--color-red, #e5534b);
+}
+body.real-pin-tab-groups [data-rp-color="yellow"] {
+	--rp-c: var(--color-yellow, #e0b341);
+}
+body.real-pin-tab-groups [data-rp-color="green"] {
+	--rp-c: var(--color-green, #4caf50);
+}
+body.real-pin-tab-groups [data-rp-color="pink"] {
+	--rp-c: var(--color-pink, #e255a1);
+}
+body.real-pin-tab-groups [data-rp-color="purple"] {
+	--rp-c: var(--color-purple, #a256e2);
+}
+body.real-pin-tab-groups [data-rp-color="cyan"] {
+	--rp-c: var(--color-cyan, #36b8c2);
+}
+body.real-pin-tab-groups [data-rp-color="orange"] {
+	--rp-c: var(--color-orange, #e08d3c);
+}
+
+/* A member tab: colored top band + faint tint, so a contiguous run reads as a
+ * group. The run's outer corners round via `data-rp-pos`. */
+body.real-pin-tab-groups .workspace-tab-header[data-rp-group] {
+	border-top: 2px solid var(--rp-c);
+	background-color: color-mix(in srgb, var(--rp-c) 12%, transparent);
+}
+body.real-pin-tab-groups .workspace-tab-header[data-rp-pos="first"],
+body.real-pin-tab-groups .workspace-tab-header[data-rp-pos="solo"] {
+	border-top-left-radius: var(--radius-m, 8px);
+}
+body.real-pin-tab-groups .workspace-tab-header[data-rp-pos="last"],
+body.real-pin-tab-groups .workspace-tab-header[data-rp-pos="solo"] {
+	border-top-right-radius: var(--radius-m, 8px);
+}
+
+/* Collapsed group: hide member tabs; only the chip remains in the strip. */
+body.real-pin-tab-groups .workspace-tab-header[data-rp-collapsed] {
+	display: none;
+}
+
+/* The group chip: a colored pill that sits inline among the tab headers. */
+body.real-pin-tab-groups .real-pin-group-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-4-1);
+	align-self: center;
+	height: var(--size-4-5);
+	margin: 0 var(--size-4-1);
+	padding: 0 var(--size-4-2);
+	border-radius: var(--radius-s);
+	background-color: color-mix(in srgb, var(--rp-c) 20%, transparent);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	line-height: 1;
+	white-space: nowrap;
+	cursor: pointer;
+	user-select: none;
+}
+body.real-pin-tab-groups .real-pin-group-chip:hover {
+	background-color: color-mix(in srgb, var(--rp-c) 32%, transparent);
+}
+body.real-pin-tab-groups .real-pin-group-chip-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background-color: var(--rp-c);
+	flex: 0 0 auto;
+}
+body.real-pin-tab-groups .real-pin-group-chip-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 12ch;
+}

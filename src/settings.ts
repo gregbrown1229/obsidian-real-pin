@@ -22,6 +22,13 @@ export interface RealPinSettings {
 	 * Obsidian's tab layout won't size tabs to their content.
 	 */
 	compactTabWidth: number;
+
+	/**
+	 * When true, Chrome-style tab groups are active: tabs can be organized into
+	 * named, colored, collapsible groups within the tab bar. Off by default
+	 * (opt-in), since it injects a chip + tags tab headers in the tab strip.
+	 */
+	enableTabGroups: boolean;
 }
 
 /** Bounds for the compact-tab-width slider (pixels). */
@@ -34,6 +41,7 @@ export const DEFAULT_SETTINGS: RealPinSettings = {
 	confirmBeforeClose: true,
 	compactPinnedTabs: false,
 	compactTabWidth: COMPACT_WIDTH_DEFAULT,
+	enableTabGroups: false,
 };
 
 export class RealPinSettingTab extends PluginSettingTab {
@@ -64,6 +72,28 @@ export class RealPinSettingTab extends PluginSettingTab {
 			);
 
 		this.addCompactPinnedTabsSetting(containerEl);
+		this.addTabGroupsSetting(containerEl);
+	}
+
+	private addTabGroupsSetting(containerEl: HTMLElement): void {
+		new Setting(containerEl).setName("Tab groups").setHeading();
+
+		new Setting(containerEl)
+			.setName("Enable tab groups")
+			.setDesc(
+				"Organize tabs into named, colored, collapsible Chrome-style groups in the " +
+					"tab bar. Group a tab from its command or the group chip's menu, then drag " +
+					"tabs in or out. Takes effect immediately.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.enableTabGroups)
+					.onChange(async (value) => {
+						this.plugin.settings.enableTabGroups = value;
+						await this.plugin.saveSettings();
+						this.plugin.tabGroups.apply();
+					}),
+			);
 	}
 
 	private addCompactPinnedTabsSetting(containerEl: HTMLElement): void {

@@ -2,6 +2,9 @@ import { Plugin, View } from "obsidian";
 import { around } from "monkey-around";
 import { ConfirmCloseModal } from "./ConfirmCloseModal";
 import { CompactPinnedTabs } from "./compactPinnedTabs";
+import { TabGroupController } from "./tabGroups/controller";
+import { migrateData } from "./tabGroups/model";
+import type { PersistedData } from "./tabGroups/model";
 import {
 	DEFAULT_SETTINGS,
 	RealPinSettings,
@@ -20,6 +23,8 @@ type CommandsRegistry = { commands: Record<string, CloseCommand | undefined> };
 export default class RealPinPlugin extends Plugin {
 	settings!: RealPinSettings;
 	compactTabs!: CompactPinnedTabs;
+	tabGroups!: TabGroupController;
+	private data!: PersistedData<RealPinSettings>;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -31,18 +36,32 @@ export default class RealPinPlugin extends Plugin {
 		// every window on unload.
 		this.compactTabs = new CompactPinnedTabs(this);
 		this.app.workspace.onLayoutReady(() => this.compactTabs.start());
+
+		// Tab groups: same lifecycle — start once the layout is ready so existing
+		// tabs/popouts are picked up; `start()` registers its own teardown.
+		this.tabGroups = new TabGroupController(this);
+		this.app.workspace.onLayoutReady(() => this.tabGroups.start());
+
+		this.addCommand({
+			id: "new-tab-group",
+			name: "New tab group from active tab",
+			callback: () => this.tabGroups.createGroupFromActiveLeaf(),
+		});
+		this.addCommand({
+			id: "toggle-tab-group-collapse",
+			name: "Toggle collapse of the active tab's group",
+			callback: () => this.tabGroups.toggleCollapseActive(),
+		});
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<RealPinSettings>,
-		);
+		this.data = migrateData(await this.loadData(), DEFAULT_SETTINGS);
+		this.settings = this.data.settings;
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		this.data.settings = this.settings;
+		await this.saveData(this.data);
 	}
 
 	private patchCloseCommand(): void {
