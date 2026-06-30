@@ -23,6 +23,7 @@ Shrinks a pinned tab to just its icon when it has one, so a row of pinned tabs r
 - Only pinned tabs that **have an assigned icon** shrink. A pinned tab with no icon keeps its title, so it stays distinguishable.
 - The title isn't lost: hover the compact tab and it shows as a tooltip (and it's exposed to screen readers via `aria-label`). The close “×” and right-click menu still work.
 - Works in popped-out windows too. Takes effect immediately — no reload needed. Turning it off (or disabling Iconize, or disabling Real Pin) restores every tab.
+- How narrow a compacted tab gets is the CSS variable `--real-pin-compact-tab-width` (default `3.5em`). Override it in a CSS snippet to taste, e.g. `:root { --real-pin-compact-tab-width: 4em; }`. (Obsidian grows tabs to fill the bar and won't size them to their content, so the width is a cap rather than a true shrink-to-fit.)
 
 ## Scope
 

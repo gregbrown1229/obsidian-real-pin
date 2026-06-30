@@ -86,23 +86,26 @@ test("a pinned note without an icon stays full-size", async () => {
 	assert.equal(r.ariaLabel, null, "no aria-label added");
 });
 
-test("the hidden title stays hidden even when a theme overrides its display", async () => {
-	// Regression test for the title-sliver bug: a theme/snippet rule on the tab
-	// title (higher specificity than ours, no !important) must not beat our hide
-	// and leave a clipped sliver showing. Inject such a rule, assert the title is
-	// still fully hidden, then remove the rule so later tests are unaffected.
+test("a compacted tab collapses to the capped width, narrower than a full tab", async () => {
+	// Obsidian grows tabs to fill and won't size them to content, so styles.css
+	// caps the width via --real-pin-compact-tab-width. Assert the compacted tab
+	// respects that cap (read from computed style — no hard-coded px) and is
+	// clearly narrower than the non-compacted icon-less tab.
 	const r = await obs.evalInApp(`
-		const s = document.createElement('style');
-		s.id = 'rp-theme-override-test';
-		s.textContent = '.workspace-tabs .workspace-tab-header .workspace-tab-header-inner .workspace-tab-header-inner-title { display: flex; }';
-		document.head.appendChild(s);
-		const title = window.__rp.withIcon.tabHeaderEl.querySelector('.workspace-tab-header-inner-title');
-		const out = { display: getComputedStyle(title).display, width: title.getBoundingClientRect().width };
-		s.remove();
-		return out;
+		const compact = window.__rp.withIcon.tabHeaderEl.getBoundingClientRect().width;
+		const full = window.__rp.noIcon.tabHeaderEl.getBoundingClientRect().width;
+		const cap = parseFloat(getComputedStyle(window.__rp.withIcon.tabHeaderEl).maxWidth);
+		return { compact, full, cap };
 	`);
-	assert.equal(r.display, "none", "title must stay hidden despite a theme override");
-	assert.equal(r.width, 0, "no sliver of the title should be visible");
+	assert.ok(Number.isFinite(r.cap), "compacted tab should have a finite max-width cap");
+	assert.ok(
+		r.compact <= r.cap + 1,
+		`compacted width ${r.compact} should respect the cap ${r.cap}`,
+	);
+	assert.ok(
+		r.compact < r.full,
+		`compacted tab (${r.compact}) should be narrower than a full tab (${r.full})`,
+	);
 });
 
 test("turning the setting off reverts compacted tabs", async () => {

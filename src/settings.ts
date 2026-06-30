@@ -80,10 +80,6 @@ export class RealPinSettingTab extends PluginSettingTab {
 		} else if (iconize.settings?.iconInTabsEnabled === false) {
 			desc += " Enable Iconize's “Toggle icon in tabs” for this to apply.";
 		}
-		// Some themes/snippets style the tab title strongly enough to override the
-		// hide and leave a thin sliver of the title showing; flag that here.
-		desc +=
-			" Note: with some themes a thin sliver of the title can still show — that means the theme is overriding the title hide.";
 
 		new Setting(containerEl)
 			.setName("Compact pinned tabs")

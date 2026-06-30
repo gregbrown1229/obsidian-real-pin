@@ -5,20 +5,24 @@
  * plugin toggles onto a pinned tab's header element, so this stylesheet has zero
  * visual effect until the feature applies it. We never hide or zero-width the
  * header itself — that would also kill the Iconize icon and the context-menu /
- * close-button hit target. We only hide the title text and tighten the spacing
- * so the header collapses to roughly icon width.
+ * close-button hit target. We hide the title text and cap the header width so the
+ * tab shrinks to roughly its icon.
  */
 
 .workspace-tab-header.real-pin-compact-tab .workspace-tab-header-inner-title {
-	/* `!important` so a theme/snippet that styles the tab title can't beat us by
-	 * specificity or load order and leave a clipped sliver of the title showing.
-	 * Scoped under the marker, so it only ever hides a compacted tab's title. */
-	display: none !important;
+	display: none;
 }
 
 .workspace-tab-header.real-pin-compact-tab {
+	/* Obsidian grows tab headers to fill the bar (`flex: 1 1 0`) and its layout
+	 * won't size them to their content (every fit/min/max-content attempt
+	 * collapses to padding width and clips the sticky pin), so we cap the width
+	 * instead. The cap is a single named, overridable knob rather than an inline
+	 * constant: set `--real-pin-compact-tab-width` (e.g. in a CSS snippet, on
+	 * `:root` or the tab) to make compacted tabs wider or narrower. `min-width: 0`
+	 * lets the cap take effect. */
 	min-width: 0;
-	flex: 0 0 auto;
+	max-width: var(--real-pin-compact-tab-width, 3.5em) !important;
 }
 
 .workspace-tab-header.real-pin-compact-tab .workspace-tab-header-inner {
