@@ -25,6 +25,21 @@ Shrinks every pinned tab to just its icon, so a row of pinned tabs reads as a co
 - Works in popped-out windows too. Takes effect immediately — no reload needed. Turning it off (or disabling Real Pin) restores every tab.
 - Use the **Compact tab width** slider in settings to choose how narrow a compacted tab gets (it drives the `--real-pin-compact-tab-width` CSS variable, default `72px`). Obsidian grows tabs to fill the bar and won't size them to their content, so the width is a cap rather than a true shrink-to-fit.
 
+## Tab groups (Chrome-style)
+
+Organize tabs into named, colored, collapsible groups **inside the single tab bar** — like Google Chrome's tab groups — and save groups to reopen later.
+
+Opt-in: turn on **Settings → Real Pin → Enable tab groups** (off by default).
+
+- **Make a group** — run **New tab group from active tab**, or **Add active tab to group** (pick an existing group or create one). A colored chip appears in the tab bar before the group's tabs, which share a colored band.
+- **Drag to group** — Obsidian already lets you drag a tab along the bar; drop it *inside* a group's run to add it, or drag a member *out* to remove it. (We read the native reorder and update membership — no custom drag layer.)
+- **Collapse / expand** — click the group chip (collapsed shows just the chip; the member tabs hide).
+- **Rename / recolor** — right-click the chip → **Edit name and color…** (nine Chrome colors).
+- **Save & reopen** — right-click the chip → **Save group** (or the command). Saved groups live in the **Saved tab groups** sidebar panel (ribbon icon, or the **Open the saved tab groups panel** command); **Open** reopens every tab back into the current tab area, regrouped with the original name and color. A saved group stays in sync with its open group, like Chrome's saved groups.
+- **Persists** — live groups are restored when you reopen the vault; saved groups persist until you delete them. Works in popped-out windows too. Turning the feature off (or disabling Real Pin) removes every chip and reverts every tab.
+
+Because Obsidian has no grouping API for the tab bar, this tags tab headers and inserts a chip into the strip (the same kind of tab-bar styling the compact-tabs feature already uses) — it never patches Obsidian's drag or layout engine.
+
 ## Scope
 
 - ✅ `Cmd+W` / `Ctrl+W` and any custom hotkey bound to **Close current tab**
