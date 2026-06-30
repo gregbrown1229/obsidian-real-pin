@@ -1,10 +1,20 @@
 import { debounce } from "obsidian";
-import type { TFile, WorkspaceLeaf } from "obsidian";
+import type { WorkspaceLeaf } from "obsidian";
 import type RealPinPlugin from "./main";
 import { COMPACT_MARKER, SHRINK_ALL_PINNED, shouldCompact } from "./compactPolicy";
 
 /** CSS variable `styles.css` reads for the compacted tab's max-width. */
 const WIDTH_VAR = "--real-pin-compact-tab-width";
+
+/**
+ * How we tell a tab has an Iconize icon: Iconize marks every icon it paints with
+ * the `iconize-icon` class and a `data-icon` attribute (it finds its own icons
+ * the same way). Reading the *rendered* result — rather than Iconize's
+ * `getIconNameFromPath` data, which loads asynchronously after our first pass —
+ * is what makes compaction land the moment the icon appears instead of on the
+ * next tab interaction.
+ */
+const ICONIZE_ICON_SELECTOR = ".iconize-icon, [data-icon]";
 
 /**
  * The tab header element a leaf is rendered into. It's real (Iconize depends on
@@ -14,19 +24,6 @@ const WIDTH_VAR = "--real-pin-compact-tab-width";
  */
 interface LeafWithTabHeader {
 	tabHeaderEl?: HTMLElement;
-}
-
-/**
- * The sliver of Iconize (`obsidian-icon-folder`) we read. All members are
- * optional and every call is `typeof`-guarded, so a future Iconize change
- * degrades to "no icon" / inert rather than throwing.
- */
-interface IconizePlugin {
-	getIconNameFromPath?(path: string): string | undefined;
-	settings?: {
-		iconInTabsEnabled?: boolean;
-		iconInFrontmatterFieldName?: string;
-	};
 }
 
 /**
@@ -63,19 +60,20 @@ export class CompactPinnedTabs {
 		this.plugin.registerEvent(workspace.on("layout-change", onChange));
 		this.plugin.registerEvent(workspace.on("active-leaf-change", onChange));
 
-		// Iconize loads its data and paints tab icons asynchronously — often after
-		// our first reconcile — so a pinned tab can gain its icon a beat later and
-		// otherwise never compact (the "sometimes it doesn't shrink" race). Watch
-		// for tab-header DOM changes and re-reconcile. We observe `childList` only
-		// (not attributes), so our own marker-class toggles can't re-trigger us, and
-		// the callback ignores mutations outside a tab header so editor churn is free.
+		// Iconize paints tab icons asynchronously — often after our first reconcile —
+		// so a pinned tab gains its icon a beat later. Watch for tab-header DOM
+		// changes (the icon being inserted) and re-reconcile, so the tab compacts the
+		// moment the icon appears instead of waiting for the next tab interaction.
+		// We observe `childList` only (not attributes), so our own marker-class
+		// toggles can't re-trigger us, and ignore mutations outside a tab header so
+		// editor churn is free.
 		this.compactDoc = activeDocument;
 		const observer = new MutationObserver((records) => {
 			for (const record of records) {
 				const target = record.target;
 				if (
 					target.instanceOf(Element) &&
-					target.closest(".workspace-tab-header-container")
+					target.closest(".workspace-tab-header")
 				) {
 					onChange();
 					return;
@@ -111,21 +109,21 @@ export class CompactPinnedTabs {
 	}
 
 	/**
-	 * Reconcile every tab to the current setting. Reads the live setting each
-	 * time, so toggling takes effect immediately. Collapses to `clearAll()`
-	 * whenever the feature can't apply (setting off, or Iconize absent / not
-	 * painting tab icons).
+	 * Reconcile every tab to the current setting. Reads the live setting each time,
+	 * so toggling takes effect immediately. When the setting is off, clears
+	 * everything; otherwise each tab compacts only if it's pinned and Iconize has
+	 * painted an icon on it (so Iconize being absent or not painting tab icons
+	 * simply means nothing qualifies).
 	 */
 	refresh(): void {
-		const iconize = this.getIconize();
-		if (!this.plugin.settings.compactPinnedTabs || !iconize) {
+		if (!this.plugin.settings.compactPinnedTabs) {
 			this.clearAll();
 			return;
 		}
 		// `iterateRootLeaves` covers the main window and popouts; sidebars are
 		// excluded by design (their tabs aren't part of the pinned-tab strip).
 		this.plugin.app.workspace.iterateRootLeaves((leaf) => {
-			this.reconcile(leaf, iconize);
+			this.reconcile(leaf);
 		});
 	}
 
@@ -141,13 +139,13 @@ export class CompactPinnedTabs {
 		});
 	}
 
-	private reconcile(leaf: WorkspaceLeaf, iconize: IconizePlugin): void {
+	private reconcile(leaf: WorkspaceLeaf): void {
 		const header = (leaf as unknown as LeafWithTabHeader).tabHeaderEl;
 		if (!header) return;
 
 		const on = shouldCompact({
 			pinned: leaf.getViewState().pinned ?? false,
-			hasIcon: this.hasAssignedIcon(leaf, iconize),
+			hasIcon: header.querySelector(ICONIZE_ICON_SELECTOR) !== null,
 			shrinkAll: SHRINK_ALL_PINNED,
 		});
 
@@ -156,46 +154,5 @@ export class CompactPinnedTabs {
 		header.classList.toggle(COMPACT_MARKER, on);
 		if (on) header.setAttribute("aria-label", leaf.getDisplayText());
 		else header.removeAttribute("aria-label");
-	}
-
-	/**
-	 * Iconize, but only when it would actually be painting tab icons — i.e. it's
-	 * installed/enabled (`getPlugin` returns the instance only then) and its
-	 * `iconInTabsEnabled` setting isn't off. Otherwise `null`, so the feature
-	 * stays inert instead of hiding titles with nothing to show.
-	 */
-	private getIconize(): IconizePlugin | null {
-		const instance = (
-			this.plugin.app as unknown as {
-				plugins: { getPlugin(id: string): unknown };
-			}
-		).plugins.getPlugin("obsidian-icon-folder");
-		if (!instance) return null;
-		const iconize = instance as IconizePlugin;
-		if (iconize.settings?.iconInTabsEnabled === false) return null;
-		return iconize;
-	}
-
-	/**
-	 * Whether this leaf's file has an Iconize icon. Checks Iconize's path map and
-	 * falls back to the frontmatter field, because `getIconNameFromPath` is
-	 * path-map-only and would miss frontmatter-assigned icons Iconize still renders.
-	 */
-	private hasAssignedIcon(leaf: WorkspaceLeaf, iconize: IconizePlugin): boolean {
-		// `file` lives on `FileView`, not the base `View`; read it defensively.
-		const file = (leaf.view as { file?: TFile }).file;
-		if (!file) return false;
-
-		if (
-			typeof iconize.getIconNameFromPath === "function" &&
-			iconize.getIconNameFromPath(file.path)
-		) {
-			return true;
-		}
-
-		const fieldName = iconize.settings?.iconInFrontmatterFieldName ?? "icon";
-		const frontmatter =
-			this.plugin.app.metadataCache.getFileCache(file)?.frontmatter;
-		return frontmatter?.[fieldName] != null;
 	}
 }

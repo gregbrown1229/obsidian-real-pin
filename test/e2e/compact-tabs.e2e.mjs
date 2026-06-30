@@ -17,13 +17,14 @@ let obs;
 before(async () => {
 	obs = await launchObsidian({ vault: VAULT });
 
-	// Arrange once: make Iconize paint tab icons, enable our feature, and open
-	// both fixture notes in pinned tabs. Leaves are stashed on a page global so
+	// Arrange once: enable the feature, open both fixture notes in pinned tabs,
+	// then simulate Iconize painting an icon onto one of them *after* the tab is
+	// already open — exactly the "icon arrives late" race. The controller's
+	// MutationObserver should notice and compact that tab on its own, with no
+	// explicit refresh and no tab click. Leaves are stashed on a page global so
 	// later (serializable-only) reads can refer back to them.
 	await obs.evalInApp(`
 		const app = window.app;
-		const iconize = app.plugins.plugins['obsidian-icon-folder'];
-		if (iconize?.settings) iconize.settings.iconInTabsEnabled = true;
 		const rp = app.plugins.plugins['real-pin'];
 		rp.settings.compactPinnedTabs = true;
 
@@ -41,16 +42,20 @@ before(async () => {
 			noIcon: await openPinned('no-icon.md'),
 		};
 
-		// Reconcile, but wait until with-icon.md's frontmatter icon is actually
-		// indexed and the marker has landed — opening a file and reconciling in the
-		// same tick races the metadata cache and makes the suite flaky.
-		const withIconFile = app.vault.getAbstractFileByPath('with-icon.md');
-		for (let i = 0; i < 75; i++) {
-			rp.compactTabs.refresh();
-			const indexed = !!app.metadataCache.getFileCache(withIconFile)?.frontmatter?.icon;
-			const marked = window.__rp.withIcon.tabHeaderEl.classList.contains('real-pin-compact-tab');
-			if (indexed && marked) break;
-			await new Promise((r) => setTimeout(r, 200));
+		// Paint an Iconize-style icon (its '.iconize-icon' + 'data-icon' markers)
+		// into the tab header, the way Iconize does once its data loads.
+		const iconEl = window.__rp.withIcon.tabHeaderEl.querySelector('.workspace-tab-header-inner-icon');
+		iconEl.style.display = 'flex';
+		const icon = document.createElement('div');
+		icon.className = 'iconize-icon';
+		icon.setAttribute('data-icon', 'LiHome');
+		icon.textContent = '🏠';
+		iconEl.appendChild(icon);
+
+		// Do NOT call refresh() here: the observer must drive the compaction.
+		for (let i = 0; i < 60; i++) {
+			if (window.__rp.withIcon.tabHeaderEl.classList.contains('real-pin-compact-tab')) break;
+			await new Promise((r) => setTimeout(r, 100));
 		}
 		return true;
 	`);
