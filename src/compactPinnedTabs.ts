@@ -51,6 +51,10 @@ export class CompactPinnedTabs {
 	private started = false;
 	/** The main window's document, captured at start so width updates always land there. */
 	private compactDoc: Document | null = null;
+	/** Leaves we've already attached a `pinned-change` listener to. */
+	private readonly wiredLeaves = new WeakSet<WorkspaceLeaf>();
+	/** Debounced reconcile, shared by every trigger; set in `start()`. */
+	private scheduleRefresh: () => void = () => undefined;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -66,10 +70,12 @@ export class CompactPinnedTabs {
 		this.started = true;
 
 		const { workspace } = this.plugin.app;
-		// One trailing-edge debounce shared by every trigger. `layout-change` is the
-		// primary signal (pin/unpin, open/close/move); `active-leaf-change` is a
-		// safety net for deferred/focus re-renders.
+		// One trailing-edge debounce shared by every trigger. `layout-change` covers
+		// open/close/move; `active-leaf-change` covers focus. Pin/unpin fires neither
+		// (it only fires a per-leaf `pinned-change`), so those are wired separately in
+		// `wirePinnedChange`.
 		const onChange = debounce(() => this.refresh(), 50, true);
+		this.scheduleRefresh = onChange;
 		this.plugin.registerEvent(workspace.on("layout-change", onChange));
 		this.plugin.registerEvent(workspace.on("active-leaf-change", onChange));
 
@@ -128,8 +134,23 @@ export class CompactPinnedTabs {
 		// `iterateRootLeaves` covers the main window and popouts; sidebars are
 		// excluded by design (their tabs aren't part of the pinned-tab strip).
 		this.plugin.app.workspace.iterateRootLeaves((leaf) => {
+			this.wirePinnedChange(leaf);
 			this.reconcile(leaf, iconize);
 		});
+	}
+
+	/**
+	 * Pin/unpin fires no workspace-level event we listen to, so a tab wouldn't
+	 * re-compact until the next interaction (the "doesn't collapse until I select a
+	 * different tab" bug). Listen per-leaf for `pinned-change` instead — deduped via
+	 * a WeakSet, and auto-cleaned on unload via `registerEvent`.
+	 */
+	private wirePinnedChange(leaf: WorkspaceLeaf): void {
+		if (this.wiredLeaves.has(leaf)) return;
+		this.wiredLeaves.add(leaf);
+		this.plugin.registerEvent(
+			leaf.on("pinned-change", () => this.scheduleRefresh()),
+		);
 	}
 
 	/** Remove every marker + aria-label we set, across all leaves and windows. */

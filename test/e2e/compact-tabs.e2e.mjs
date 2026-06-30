@@ -128,6 +128,25 @@ test("Iconize's allIconsLoaded event compacts the tab with no click (startup-rac
 	assert.equal(r.after, true, "allIconsLoaded should re-compact the tab via our listener");
 });
 
+test("unpinning expands and re-pinning re-compacts, with no tab switch", async () => {
+	// Pin/unpin fires only a per-leaf `pinned-change` (no workspace event), so
+	// without wiring it the tab wouldn't update until you click another tab.
+	const r = await obs.evalInApp(`
+		const leaf = window.__rp.withIcon;
+		const has = () => leaf.tabHeaderEl.classList.contains('real-pin-compact-tab');
+		const waitFor = async (want) => { for (let i = 0; i < 50; i++) { if (has() === want) break; await new Promise((r) => setTimeout(r, 50)); } return has(); };
+		const start = has();
+		leaf.setPinned(false);
+		const afterUnpin = await waitFor(false);
+		leaf.setPinned(true);
+		const afterPin = await waitFor(true);
+		return { start, afterUnpin, afterPin };
+	`);
+	assert.equal(r.start, true, "tab starts compacted");
+	assert.equal(r.afterUnpin, false, "unpinning should expand the tab");
+	assert.equal(r.afterPin, true, "re-pinning should compact again without switching tabs");
+});
+
 test("turning the setting off reverts compacted tabs", async () => {
 	await obs.evalInApp(`
 		const rp = window.__rp.rp;
