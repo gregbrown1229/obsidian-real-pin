@@ -1,4 +1,5 @@
-// Capture a screenshot of the tab bar with a live group, to eyeball the look.
+// Capture a screenshot of the feature: two colored groups in the tab bar plus
+// the saved-groups sidebar panel.
 import { fileURLToPath } from "node:url";
 import { writeFileSync } from "node:fs";
 import CDP from "chrome-remote-interface";
@@ -15,13 +16,21 @@ try {
 		const rp = app.plugins.plugins['real-pin'];
 		rp.settings.enableTabGroups = true; rp.tabGroups.apply();
 		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
-		for (const p of ['Inbox.md','Project Plan.md','Research.md','Notes.md','Daily.md']) await ensure(p);
+		for (const p of ['Plan.md','Research.md','Notes.md','Budget.md','Specs.md','Daily.md']) await ensure(p);
 		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
-		const a = await open('Project Plan.md'), b = await open('Research.md'), c = await open('Notes.md');
+		const a = await open('Plan.md'), b = await open('Research.md'), c = await open('Notes.md');
+		const d = await open('Budget.md'), e = await open('Specs.md');
 		await open('Daily.md');
 		await new Promise(r=>setTimeout(r,200));
-		const g = rp.tabGroups.createGroup([a.id, b.id, c.id]);
-		await new Promise(r=>setTimeout(r,150));
+		const g1 = rp.tabGroups.createGroup([a.id, b.id, c.id]);
+		rp.tabGroups.renameGroup(g1.id, 'Project');
+		const g2 = rp.tabGroups.createGroup([d.id, e.id]);
+		rp.tabGroups.renameGroup(g2.id, 'Finance');
+		rp.tabGroups.recolorGroup(g2.id, 'green');
+		rp.tabGroups.saveGroup(g1.id);
+		rp.tabGroups.saveGroup(g2.id);
+		await rp.activateSavedGroupsView();
+		await new Promise(r=>setTimeout(r,250));
 		return true;
 	`);
 	const targets = await CDP.List({ port: PORT });

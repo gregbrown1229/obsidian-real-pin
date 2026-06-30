@@ -145,6 +145,40 @@ test("live groups are persisted so they survive a reload", async () => {
 	assert.equal(persisted.hasMembers, true, "its members are persisted");
 });
 
+test("saving a group then reopening it restores its tabs as a group", async () => {
+	const r = await obs.evalInApp(`
+		const rp = window.__tg.rp;
+		rp.tabGroups.saveGroup(window.__tg.groupId);
+		await new Promise(r => setTimeout(r, 120));
+		const saved = rp.getSavedGroups();
+		const s = saved[saved.length - 1];
+		const savedCount = s.members.length;
+		await rp.tabGroups.openSavedGroup(s.id);
+		await new Promise(r => setTimeout(r, 350));
+		const reopened = rp.tabGroups.getGroups().find(g => g.name === s.name && g.id !== window.__tg.groupId);
+		return {
+			savedCount,
+			reopenedExists: !!reopened,
+			reopenedMembers: reopened ? reopened.memberIds.length : 0,
+			savedColor: s.color,
+			reopenedColor: reopened ? reopened.color : null,
+		};
+	`);
+	assert.ok(r.savedCount >= 2, "saved group captured its members");
+	assert.equal(r.reopenedExists, true, "reopening creates a live group with the saved name");
+	assert.equal(r.reopenedMembers, r.savedCount, "every member reopened");
+	assert.equal(r.reopenedColor, r.savedColor, "color preserved on reopen");
+});
+
+test("the saved-groups panel lists saved groups", async () => {
+	const rows = await obs.evalInApp(`
+		await window.__tg.rp.activateSavedGroupsView();
+		await new Promise(r => setTimeout(r, 250));
+		return activeDocument.querySelectorAll('.real-pin-saved-group').length;
+	`);
+	assert.ok(rows >= 1, "panel renders at least one saved group");
+});
+
 test("disabling the feature reverts every tab and removes chips", async () => {
 	const r = await obs.evalInApp(`
 		const rp = window.__tg.rp;

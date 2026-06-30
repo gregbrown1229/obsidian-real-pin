@@ -3,10 +3,17 @@ import type RealPinPlugin from "../main";
 import {
 	GROUP_COLORS,
 	groupOfMap,
+	memberFromViewState,
 	nextGroupName,
 	reconcile as reconcileMembership,
 } from "./model";
-import type { GroupColor, GroupPos, TabGroup } from "./model";
+import type {
+	GroupColor,
+	GroupPos,
+	PersistedLiveGroup,
+	SavedMember,
+	TabGroup,
+} from "./model";
 import {
 	TAB_GROUPS_CLASS,
 	buildChip,
@@ -15,6 +22,7 @@ import {
 	updateChip,
 } from "./overlay";
 import { GroupEditModal, GroupSuggestModal } from "./modals";
+import { SavedGroupsView, VIEW_TYPE_SAVED_GROUPS } from "./SavedGroupsView";
 
 /**
  * Obsidian models a leaf's stable id and its tab-header element, but neither is
@@ -63,6 +71,8 @@ export class TabGroupController {
 	private observers: MutationObserver[] = [];
 	private scheduled: number | null = null;
 	private saveTimer: number | null = null;
+	/** Signature of the last persisted group state, to avoid redundant writes. */
+	private lastSig = "";
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -103,12 +113,24 @@ export class TabGroupController {
 		const color: GroupColor =
 			GROUP_COLORS.find((c) => !used.has(c)) ??
 			GROUP_COLORS[this.groups.length % GROUP_COLORS.length];
+		return this.createGroupNamed(
+			ids,
+			nextGroupName(this.groups.map((g) => g.name)),
+			color,
+		);
+	}
+
+	private createGroupNamed(
+		memberIds: string[],
+		name: string,
+		color: GroupColor,
+	): TabGroup {
 		const group: TabGroup = {
 			id: newId(),
-			name: nextGroupName(this.groups.map((g) => g.name)),
+			name,
 			color,
 			collapsed: false,
-			memberIds: [...ids],
+			memberIds: [...memberIds],
 		};
 		this.groups.push(group);
 		this.reconcile();
@@ -222,6 +244,166 @@ export class TabGroupController {
 		return this.groups;
 	}
 
+	// --- saved-group library (Chrome's "saved groups") ----------------------
+
+	/** Save a live group to the library (or update its linked saved entry). */
+	saveGroup(groupId: string): void {
+		const g = this.groups.find((x) => x.id === groupId);
+		if (!g) return;
+		const members = this.snapshotMembers(g);
+		if (members.length === 0) {
+			new Notice("Nothing to save in this group.");
+			return;
+		}
+		const saved = this.plugin.getSavedGroups();
+		const now = Date.now();
+		const existing = saved.find((s) => s.linkedLiveGroupId === g.id);
+		if (existing) {
+			existing.members = members;
+			existing.name = g.name;
+			existing.color = g.color;
+			existing.updatedAt = now;
+		} else {
+			saved.push({
+				id: newId(),
+				name: g.name,
+				color: g.color,
+				members,
+				createdAt: now,
+				updatedAt: now,
+				linkedLiveGroupId: g.id,
+			});
+		}
+		void this.plugin.saveSavedGroups(saved);
+		this.refreshSavedView();
+		new Notice(`Saved group "${g.name}".`);
+	}
+
+	saveActiveGroup(): void {
+		const leaf = this.activeManagedLeaf();
+		const g = leaf
+			? this.groups.find((x) => x.memberIds.includes(id(leaf)))
+			: undefined;
+		if (g) this.saveGroup(g.id);
+		else new Notice("The active tab isn't in a group.");
+	}
+
+	/** Reopen a saved group into the current tab area, as a live group. */
+	async openSavedGroup(savedId: string): Promise<void> {
+		const saved = this.plugin.getSavedGroups().find((s) => s.id === savedId);
+		if (!saved) return;
+		const ws = this.plugin.app.workspace;
+		const newIds: string[] = [];
+		for (const member of saved.members) {
+			let leaf: WorkspaceLeaf;
+			try {
+				leaf = ws.getLeaf("tab");
+			} catch {
+				// No tab group exists yet (everything was closed) — create one.
+				leaf = ws.getLeaf(false);
+			}
+			await leaf.setViewState({
+				type: member.viewState.type,
+				state: member.viewState.state,
+			});
+			if (member.pinned) leaf.setPinned(true);
+			newIds.push(id(leaf));
+		}
+		if (newIds.length === 0) return;
+		const group = this.createGroupNamed(newIds, saved.name, saved.color);
+		saved.linkedLiveGroupId = group.id;
+		void this.plugin.saveSavedGroups(this.plugin.getSavedGroups());
+	}
+
+	deleteSavedGroup(savedId: string): void {
+		const next = this.plugin
+			.getSavedGroups()
+			.filter((s) => s.id !== savedId);
+		void this.plugin.saveSavedGroups(next);
+		this.refreshSavedView();
+	}
+
+	editSavedGroup(savedId: string): void {
+		const s = this.plugin.getSavedGroups().find((x) => x.id === savedId);
+		if (!s) return;
+		void new GroupEditModal(this.plugin.app, { name: s.name, color: s.color })
+			.ask()
+			.then((result) => {
+				if (!result) return;
+				const live = this.plugin
+					.getSavedGroups()
+					.find((x) => x.id === savedId);
+				if (!live) return;
+				live.name = result.name;
+				live.color = result.color;
+				live.updatedAt = Date.now();
+				void this.plugin.saveSavedGroups(this.plugin.getSavedGroups());
+				this.refreshSavedView();
+				if (live.linkedLiveGroupId) {
+					const lg = this.groups.find((g) => g.id === live.linkedLiveGroupId);
+					if (lg) {
+						lg.name = result.name;
+						lg.color = result.color;
+						this.reconcile();
+					}
+				}
+			});
+	}
+
+	/** Re-snapshot a saved group from its still-open linked live group. */
+	updateSavedFromLinked(savedId: string): void {
+		const s = this.plugin.getSavedGroups().find((x) => x.id === savedId);
+		if (!s) return;
+		const live = s.linkedLiveGroupId
+			? this.groups.find((g) => g.id === s.linkedLiveGroupId)
+			: undefined;
+		if (!live) {
+			new Notice("This group isn't open right now.");
+			return;
+		}
+		const members = this.snapshotMembers(live);
+		if (members.length === 0) return;
+		s.members = members;
+		s.name = live.name;
+		s.color = live.color;
+		s.updatedAt = Date.now();
+		void this.plugin.saveSavedGroups(this.plugin.getSavedGroups());
+		this.refreshSavedView();
+		new Notice(`Updated "${s.name}".`);
+	}
+
+	private snapshotMembers(group: TabGroup): SavedMember[] {
+		const members: SavedMember[] = [];
+		for (const memberId of group.memberIds) {
+			const leaf = this.leafById(memberId);
+			if (!leaf) continue;
+			const vs = leaf.getViewState();
+			members.push(
+				memberFromViewState(
+					{ type: vs.type, state: vs.state },
+					vs.pinned ?? false,
+				),
+			);
+		}
+		return members;
+	}
+
+	private leafById(leafId: string): WorkspaceLeaf | null {
+		let found: WorkspaceLeaf | null = null;
+		this.plugin.app.workspace.iterateAllLeaves((leaf) => {
+			if (id(leaf) === leafId) found = leaf;
+		});
+		return found;
+	}
+
+	private refreshSavedView(): void {
+		this.plugin.app.workspace
+			.getLeavesOfType(VIEW_TYPE_SAVED_GROUPS)
+			.forEach((leaf) => {
+				if (leaf.view instanceof SavedGroupsView) leaf.view.render();
+			});
+	}
+
 	// --- reconcile + render --------------------------------------------------
 
 	private schedule(): void {
@@ -233,21 +415,64 @@ export class TabGroupController {
 		}, 30);
 	}
 
-	/** Persist live groups (debounced) so they survive a reload. */
+	/**
+	 * Persist live groups (debounced) so they survive a reload, and keep any
+	 * linked saved groups in sync (Chrome's "living" saved group). Gated on a
+	 * signature so unchanged reconciles (e.g. active-leaf-change) don't write.
+	 */
 	private schedulePersist(): void {
 		if (this.saveTimer !== null) return;
 		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = null;
-			void this.plugin.saveLiveGroups(
-				this.groups.map((g) => ({
-					id: g.id,
-					name: g.name,
-					color: g.color,
-					collapsed: g.collapsed,
-					memberIds: [...g.memberIds],
-				})),
-			);
+			const sig = this.groupsSignature();
+			if (sig === this.lastSig) return;
+			this.lastSig = sig;
+			void this.plugin.saveLiveGroups(this.serializeLiveGroups());
+			if (this.syncLinkedSaved()) {
+				void this.plugin.saveSavedGroups(this.plugin.getSavedGroups());
+				this.refreshSavedView();
+			}
 		}, 400);
+	}
+
+	private groupsSignature(): string {
+		return JSON.stringify(
+			this.groups.map((g) => [
+				g.id,
+				g.name,
+				g.color,
+				g.collapsed,
+				g.memberIds,
+			]),
+		);
+	}
+
+	private serializeLiveGroups(): PersistedLiveGroup[] {
+		return this.groups.map((g) => ({
+			id: g.id,
+			name: g.name,
+			color: g.color,
+			collapsed: g.collapsed,
+			memberIds: [...g.memberIds],
+		}));
+	}
+
+	private syncLinkedSaved(): boolean {
+		const saved = this.plugin.getSavedGroups();
+		let changed = false;
+		for (const s of saved) {
+			if (!s.linkedLiveGroupId) continue;
+			const live = this.groups.find((g) => g.id === s.linkedLiveGroupId);
+			if (!live) continue;
+			const members = this.snapshotMembers(live);
+			if (members.length === 0) continue;
+			s.members = members;
+			s.name = live.name;
+			s.color = live.color;
+			s.updatedAt = Date.now();
+			changed = true;
+		}
+		return changed;
 	}
 
 	private reconcile(): void {
@@ -385,6 +610,12 @@ export class TabGroupController {
 				.setTitle("Edit name and color…")
 				.setIcon("pencil")
 				.onClick(() => this.editGroup(groupId)),
+		);
+		menu.addItem((i) =>
+			i
+				.setTitle("Save group")
+				.setIcon("save")
+				.onClick(() => this.saveGroup(groupId)),
 		);
 		menu.addItem((i) =>
 			i

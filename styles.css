@@ -63,32 +63,33 @@ body.real-pin-compact-pinned-tabs
  * resolve a single `--rp-c` from Obsidian's theme palette so the rest is shared.
  */
 
-/* Resolve the group accent color (member headers and the chip both carry it). */
-body.real-pin-tab-groups [data-rp-color="grey"] {
+/* Resolve the group accent color. Ungated so the chip, member band, color
+ * swatches, and the saved-groups panel dots all share one `--rp-c` source. */
+[data-rp-color="grey"] {
 	--rp-c: var(--color-base-60, #9aa0a6);
 }
-body.real-pin-tab-groups [data-rp-color="blue"] {
+[data-rp-color="blue"] {
 	--rp-c: var(--color-blue, #4b8bf5);
 }
-body.real-pin-tab-groups [data-rp-color="red"] {
+[data-rp-color="red"] {
 	--rp-c: var(--color-red, #e5534b);
 }
-body.real-pin-tab-groups [data-rp-color="yellow"] {
+[data-rp-color="yellow"] {
 	--rp-c: var(--color-yellow, #e0b341);
 }
-body.real-pin-tab-groups [data-rp-color="green"] {
+[data-rp-color="green"] {
 	--rp-c: var(--color-green, #4caf50);
 }
-body.real-pin-tab-groups [data-rp-color="pink"] {
+[data-rp-color="pink"] {
 	--rp-c: var(--color-pink, #e255a1);
 }
-body.real-pin-tab-groups [data-rp-color="purple"] {
+[data-rp-color="purple"] {
 	--rp-c: var(--color-purple, #a256e2);
 }
-body.real-pin-tab-groups [data-rp-color="cyan"] {
+[data-rp-color="cyan"] {
 	--rp-c: var(--color-cyan, #36b8c2);
 }
-body.real-pin-tab-groups [data-rp-color="orange"] {
+[data-rp-color="orange"] {
 	--rp-c: var(--color-orange, #e08d3c);
 }
 
@@ -175,4 +176,41 @@ body.real-pin-tab-groups .real-pin-group-chip-name {
 .real-pin-suggest-group {
 	display: flex;
 	align-items: center;
+}
+
+/* Saved-groups sidebar panel. */
+.real-pin-saved-groups {
+	padding: var(--size-4-2);
+}
+.real-pin-saved-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+.real-pin-saved-group {
+	padding: var(--size-4-2) 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.real-pin-saved-group-header {
+	display: flex;
+	align-items: center;
+	gap: var(--size-4-2);
+}
+.real-pin-saved-group-name {
+	flex: 1;
+	font-weight: var(--font-semibold);
+}
+.real-pin-saved-group-count {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+.real-pin-saved-group-actions {
+	display: flex;
+	gap: var(--size-4-2);
+	margin: var(--size-4-1) 0;
+}
+.real-pin-saved-group-members {
+	margin: var(--size-4-1) 0 0;
+	padding-left: var(--size-4-4);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
 }
