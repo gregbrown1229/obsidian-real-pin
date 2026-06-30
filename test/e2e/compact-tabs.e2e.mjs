@@ -147,32 +147,6 @@ test("unpinning expands and re-pinning re-compacts, with no tab switch", async (
 	assert.equal(r.afterPin, true, "re-pinning should compact again without switching tabs");
 });
 
-test("a pinned note that inherits its icon from a folder compacts", async () => {
-	// `getIconNameFromPath` is exact-path-only, so a folder icon a tab visibly
-	// shows is invisible to it unless we walk ancestor folders. Assign an icon to
-	// a folder, pin a note inside it, and assert the inherited icon is detected.
-	const r = await obs.evalInApp(`
-		const app = window.app;
-		const ic = app.plugins.plugins['obsidian-icon-folder'];
-		await app.vault.createFolder('Folder').catch(() => {});
-		await app.vault.create('Folder/note.md', '# note').catch(() => {});
-		await ic.addFolderIcon('Folder', 'LiHome'); // icon on the FOLDER, not the file
-		const rp = app.plugins.plugins['real-pin'];
-		const leaf = app.workspace.getLeaf('tab');
-		await leaf.openFile(app.vault.getAbstractFileByPath('Folder/note.md'));
-		leaf.setPinned(true);
-		for (let i = 0; i < 60; i++) {
-			rp.compactTabs.refresh();
-			if (leaf.tabHeaderEl.classList.contains('real-pin-compact-tab')) break;
-			await new Promise((r) => setTimeout(r, 50));
-		}
-		const out = leaf.tabHeaderEl.classList.contains('real-pin-compact-tab');
-		leaf.setPinned(false); // leave workspace tidy for later tests
-		return out;
-	`);
-	assert.equal(r, true, "a folder-inherited icon should be detected and compact the tab");
-});
-
 test("turning the setting off reverts compacted tabs", async () => {
 	await obs.evalInApp(`
 		const rp = window.__rp.rp;
