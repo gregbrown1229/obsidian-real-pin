@@ -17,20 +17,23 @@
 	/* Obsidian grows tab headers to fill the bar (`flex: 1 1 0`) and its layout
 	 * won't size them to their content (every fit/min/max-content attempt
 	 * collapses to padding width and clips the sticky pin), so we cap the width
-	 * instead. The cap is a single named, overridable knob rather than an inline
-	 * constant: set `--real-pin-compact-tab-width` (e.g. in a CSS snippet, on
-	 * `:root` or the tab) to make compacted tabs wider or narrower. `min-width: 0`
-	 * lets the cap take effect. */
+	 * instead. The cap is driven by the `--real-pin-compact-tab-width` variable,
+	 * which the plugin sets from the "Compact tab width" settings slider (the
+	 * fallback here only applies before the plugin sets it). `min-width: 0` lets
+	 * the cap take effect. */
 	min-width: 0;
-	max-width: var(--real-pin-compact-tab-width, 3.5em) !important;
+	max-width: var(--real-pin-compact-tab-width, 72px) !important;
 }
 
 .workspace-tab-header.real-pin-compact-tab .workspace-tab-header-inner {
-	/* Logical property → mirrors correctly under RTL; var is Obsidian's spacing scale. */
-	padding-inline: var(--size-4-2);
-	gap: 0;
+	/* Keep Obsidian's natural left/right inset (don't override padding), and add
+	 * room between the icon and the pin — the pin is the unpin button, so it
+	 * needs space not to feel cramped or be easy to mis-click. */
+	gap: var(--size-4-2);
 }
 
 .workspace-tab-header.real-pin-compact-tab .workspace-tab-header-inner-icon {
+	/* Spacing to the pin is the flex `gap`; drop the icon's default end margin so
+	 * it isn't doubled. */
 	margin: 0;
 }
