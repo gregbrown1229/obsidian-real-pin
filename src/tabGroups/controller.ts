@@ -73,6 +73,8 @@ export class TabGroupController {
 	private saveTimer: number | null = null;
 	/** Signature of the last persisted group state, to avoid redundant writes. */
 	private lastSig = "";
+	/** Strips we've already wired delegated chip listeners onto. */
+	private readonly delegated = new WeakSet<HTMLElement>();
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -573,6 +575,8 @@ export class TabGroupController {
 			newTagged.add(header);
 		}
 
+		this.attachDelegation(strip);
+
 		for (const g of groups) {
 			const firstId = order.find((m) => groupOf.get(m) === g.id);
 			if (firstId === undefined) continue;
@@ -581,18 +585,74 @@ export class TabGroupController {
 
 			let chip = this.chips.get(g.id);
 			if (!chip) {
-				chip = buildChip(strip.ownerDocument, {
-					onToggle: () => this.toggleCollapse(g.id),
-					onContextMenu: (evt) => this.showChipMenu(g.id, evt),
-				});
+				chip = buildChip(strip.ownerDocument);
 				this.chips.set(g.id, chip);
 			}
+			chip.dataset.rpGroupId = g.id;
 			updateChip(chip, g.name, g.color, g.collapsed);
 			if (chip.parentElement !== strip || chip.nextElementSibling !== firstHeader) {
 				strip.insertBefore(chip, firstHeader);
 			}
 			seenGroupIds.add(g.id);
 		}
+
+		// Drop any chips Obsidian cloned from ours (clones aren't in our cache).
+		const live = new Set(this.chips.values());
+		strip
+			.querySelectorAll<HTMLElement>(".real-pin-group-chip")
+			.forEach((el) => {
+				if (!live.has(el)) el.remove();
+			});
+	}
+
+	/**
+	 * Wire chip interactions via ONE capture-phase delegated listener per strip,
+	 * keyed off `data-rp-group-id`. Survives Obsidian cloning the chip (lost
+	 * per-element listeners) and beats Obsidian's own bubble-phase tab handlers.
+	 */
+	private attachDelegation(strip: HTMLElement): void {
+		if (this.delegated.has(strip)) return;
+		this.delegated.add(strip);
+		const chipOf = (e: Event): HTMLElement | null => {
+			const target = e.target as HTMLElement | null;
+			return target?.closest<HTMLElement>(".real-pin-group-chip") ?? null;
+		};
+		this.plugin.registerDomEvent(
+			strip,
+			"click",
+			(e) => {
+				const chip = chipOf(e);
+				if (!chip?.dataset.rpGroupId) return;
+				e.preventDefault();
+				e.stopPropagation();
+				this.toggleCollapse(chip.dataset.rpGroupId);
+			},
+			{ capture: true },
+		);
+		this.plugin.registerDomEvent(
+			strip,
+			"contextmenu",
+			(e) => {
+				const chip = chipOf(e);
+				if (!chip?.dataset.rpGroupId) return;
+				e.preventDefault();
+				e.stopPropagation();
+				this.showChipMenu(chip.dataset.rpGroupId, e);
+			},
+			{ capture: true },
+		);
+		this.plugin.registerDomEvent(
+			strip,
+			"keydown",
+			(e) => {
+				if (e.key !== "Enter" && e.key !== " ") return;
+				const chip = chipOf(e);
+				if (!chip?.dataset.rpGroupId) return;
+				e.preventDefault();
+				this.toggleCollapse(chip.dataset.rpGroupId);
+			},
+			{ capture: true },
+		);
 	}
 
 	private showChipMenu(groupId: string, evt: MouseEvent): void {

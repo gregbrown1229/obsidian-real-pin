@@ -37,13 +37,16 @@ export function clearHeaderAttrs(header: HTMLElement): void {
 	delete header.dataset.rpCollapsed;
 }
 
-export interface ChipCallbacks {
-	onToggle(): void;
-	onContextMenu(evt: MouseEvent): void;
-}
-
-/** Build a group chip (colored dot + name) that lives in the tab strip. */
-export function buildChip(doc: Document, cb: ChipCallbacks): HTMLElement {
+/**
+ * Build a group chip (colored dot + name) that lives in the tab strip.
+ *
+ * Intentionally has NO event listeners: Obsidian re-renders the tab strip by
+ * `cloneNode`-ing its contents, and a clone drops `addEventListener` handlers
+ * (its `data-*` attributes survive). So the controller drives the chip via
+ * delegated, capture-phase listeners on the strip keyed off `data-rp-group-id`,
+ * which works for the original and any clone alike.
+ */
+export function buildChip(doc: Document): HTMLElement {
 	const chip = doc.createElement("div");
 	chip.className = CHIP_CLASS;
 	chip.setAttribute("role", "button");
@@ -57,22 +60,6 @@ export function buildChip(doc: Document, cb: ChipCallbacks): HTMLElement {
 	name.className = CHIP_NAME_CLASS;
 	chip.appendChild(name);
 
-	chip.addEventListener("click", (e) => {
-		e.preventDefault();
-		e.stopPropagation();
-		cb.onToggle();
-	});
-	chip.addEventListener("keydown", (e) => {
-		if (e.key === "Enter" || e.key === " ") {
-			e.preventDefault();
-			cb.onToggle();
-		}
-	});
-	chip.addEventListener("contextmenu", (e) => {
-		e.preventDefault();
-		e.stopPropagation();
-		cb.onContextMenu(e);
-	});
 	return chip;
 }
 

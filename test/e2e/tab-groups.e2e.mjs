@@ -92,25 +92,34 @@ test("an ungrouped tab is left untouched", async () => {
 	assert.equal(c.pos, null);
 });
 
-test("collapsing hides members but keeps the chip", async () => {
-	await obs.evalInApp(
-		`window.__tg.rp.tabGroups.toggleCollapse(window.__tg.groupId); await new Promise(r=>setTimeout(r,100)); return true;`,
-	);
-	const a = await read("a");
-	assert.equal(a.collapsed, "1", "member marked collapsed");
-	assert.equal(a.display, "none", "member tab is hidden");
-	const chipVisible = await obs.evalInApp(`
-		const strip = window.__tg.a.tabHeaderEl.parentElement;
-		const chip = strip.querySelector('.real-pin-group-chip');
-		return !!chip && getComputedStyle(chip).display !== 'none';
+test("clicking the chip collapses/expands — even after a re-render", async () => {
+	// Regression guard: Obsidian re-renders the strip by cloning its children,
+	// which drops a chip's per-element listeners. We force a re-render (activate
+	// a member), then drive collapse by *clicking the chip element* (not the API)
+	// and assert there's exactly one chip and the click works.
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const { a } = window.__tg;
+		app.workspace.setActiveLeaf(a, { focus: true });
+		await new Promise(r => setTimeout(r, 220));
+		const strip = a.tabHeaderEl.parentElement;
+		const disp = () => getComputedStyle(a.tabHeaderEl).display;
+		const before = disp();
+		strip.querySelector('.real-pin-group-chip').click();
+		await new Promise(r => setTimeout(r, 200));
+		const collapsed = disp();
+		const chipCount = strip.querySelectorAll('.real-pin-group-chip').length;
+		const chipVisible = getComputedStyle(strip.querySelector('.real-pin-group-chip')).display !== 'none';
+		strip.querySelector('.real-pin-group-chip').click();
+		await new Promise(r => setTimeout(r, 200));
+		const expanded = disp();
+		return { before, collapsed, expanded, chipCount, chipVisible };
 	`);
-	assert.equal(chipVisible, true, "chip stays visible while collapsed");
-
-	// expand again for the following tests
-	await obs.evalInApp(
-		`window.__tg.rp.tabGroups.toggleCollapse(window.__tg.groupId); await new Promise(r=>setTimeout(r,100)); return true;`,
-	);
-	assert.equal((await read("a")).display !== "none", true, "member shown again");
+	assert.notEqual(r.before, "none", "starts expanded");
+	assert.equal(r.collapsed, "none", "clicking the chip hides members");
+	assert.equal(r.chipVisible, true, "chip stays visible while collapsed");
+	assert.equal(r.chipCount, 1, "no duplicate (cloned) chip remains");
+	assert.notEqual(r.expanded, "none", "clicking again expands");
 });
 
 test("dragging an ungrouped tab into the group's run joins it", async () => {
