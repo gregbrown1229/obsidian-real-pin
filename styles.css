@@ -10,7 +10,10 @@
  */
 
 .workspace-tab-header.real-pin-compact-tab .workspace-tab-header-inner-title {
-	display: none;
+	/* `!important` so a theme/snippet that styles the tab title can't beat us by
+	 * specificity or load order and leave a clipped sliver of the title showing.
+	 * Scoped under the marker, so it only ever hides a compacted tab's title. */
+	display: none !important;
 }
 
 .workspace-tab-header.real-pin-compact-tab {

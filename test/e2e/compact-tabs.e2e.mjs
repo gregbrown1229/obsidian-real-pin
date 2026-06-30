@@ -40,7 +40,18 @@ before(async () => {
 			withIcon: await openPinned('with-icon.md'),
 			noIcon: await openPinned('no-icon.md'),
 		};
-		rp.compactTabs.refresh();
+
+		// Reconcile, but wait until with-icon.md's frontmatter icon is actually
+		// indexed and the marker has landed — opening a file and reconciling in the
+		// same tick races the metadata cache and makes the suite flaky.
+		const withIconFile = app.vault.getAbstractFileByPath('with-icon.md');
+		for (let i = 0; i < 75; i++) {
+			rp.compactTabs.refresh();
+			const indexed = !!app.metadataCache.getFileCache(withIconFile)?.frontmatter?.icon;
+			const marked = window.__rp.withIcon.tabHeaderEl.classList.contains('real-pin-compact-tab');
+			if (indexed && marked) break;
+			await new Promise((r) => setTimeout(r, 200));
+		}
 		return true;
 	`);
 });
@@ -73,6 +84,25 @@ test("a pinned note without an icon stays full-size", async () => {
 	assert.equal(r.marker, false, "no marker on an icon-less tab");
 	assert.equal(r.titleDisplay, "block", "title stays visible");
 	assert.equal(r.ariaLabel, null, "no aria-label added");
+});
+
+test("the hidden title stays hidden even when a theme overrides its display", async () => {
+	// Regression test for the title-sliver bug: a theme/snippet rule on the tab
+	// title (higher specificity than ours, no !important) must not beat our hide
+	// and leave a clipped sliver showing. Inject such a rule, assert the title is
+	// still fully hidden, then remove the rule so later tests are unaffected.
+	const r = await obs.evalInApp(`
+		const s = document.createElement('style');
+		s.id = 'rp-theme-override-test';
+		s.textContent = '.workspace-tabs .workspace-tab-header .workspace-tab-header-inner .workspace-tab-header-inner-title { display: flex; }';
+		document.head.appendChild(s);
+		const title = window.__rp.withIcon.tabHeaderEl.querySelector('.workspace-tab-header-inner-title');
+		const out = { display: getComputedStyle(title).display, width: title.getBoundingClientRect().width };
+		s.remove();
+		return out;
+	`);
+	assert.equal(r.display, "none", "title must stay hidden despite a theme override");
+	assert.equal(r.width, 0, "no sliver of the title should be visible");
 });
 
 test("turning the setting off reverts compacted tabs", async () => {
