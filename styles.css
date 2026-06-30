@@ -141,6 +141,21 @@ body.real-pin-tab-groups .real-pin-group-chip-dot {
 	background-color: var(--rp-c);
 	flex: 0 0 auto;
 }
+
+/* Collapsed: invert to a solid colored pill with contrasting text (like Chrome),
+ * so a folded group is unmistakable at a glance. */
+body.real-pin-tab-groups .real-pin-group-chip[data-rp-collapsed] {
+	background-color: var(--rp-c);
+	color: var(--text-on-accent, #fff);
+	font-weight: var(--font-semibold);
+}
+body.real-pin-tab-groups .real-pin-group-chip[data-rp-collapsed]:hover {
+	background-color: var(--rp-c);
+	filter: brightness(1.1);
+}
+body.real-pin-tab-groups .real-pin-group-chip[data-rp-collapsed] .real-pin-group-chip-dot {
+	background-color: var(--text-on-accent, #fff);
+}
 body.real-pin-tab-groups .real-pin-group-chip-name {
 	overflow: hidden;
 	text-overflow: ellipsis;

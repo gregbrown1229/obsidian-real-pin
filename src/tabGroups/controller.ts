@@ -75,6 +75,8 @@ export class TabGroupController {
 	private lastSig = "";
 	/** Documents we've already wired delegated chip listeners onto. */
 	private readonly delegatedDocs = new WeakSet<Document>();
+	/** Last chip-toggle time per group, to dedupe pointerdown + click. */
+	private readonly recentToggles = new Map<string, number>();
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -622,19 +624,22 @@ export class TabGroupController {
 			const target = e.target as HTMLElement | null;
 			return target?.closest<HTMLElement>(".real-pin-group-chip") ?? null;
 		};
-		this.plugin.registerDomEvent(
-			doc,
-			"pointerdown",
-			(e) => {
-				if (e.button !== 0) return;
-				const chip = chipOf(e);
-				if (!chip?.dataset.rpGroupId) return;
-				e.preventDefault();
-				e.stopPropagation();
-				this.toggleCollapse(chip.dataset.rpGroupId);
-			},
-			{ capture: true },
-		);
+		// Toggle on BOTH pointerdown and click, deduped: depending on the Obsidian
+		// version, either may be the one that actually reaches us for a left press
+		// (its tab-drag can swallow one or the other). `chipToggle` ignores a
+		// repeat within a short window so we never double-toggle.
+		const onLeftPress = (e: MouseEvent): void => {
+			if (e.button !== 0) return;
+			const chip = chipOf(e);
+			if (!chip?.dataset.rpGroupId) return;
+			e.preventDefault();
+			e.stopPropagation();
+			this.chipToggle(chip.dataset.rpGroupId);
+		};
+		this.plugin.registerDomEvent(doc, "pointerdown", onLeftPress, {
+			capture: true,
+		});
+		this.plugin.registerDomEvent(doc, "click", onLeftPress, { capture: true });
 		this.plugin.registerDomEvent(
 			doc,
 			"contextmenu",
@@ -655,10 +660,19 @@ export class TabGroupController {
 				const chip = chipOf(e);
 				if (!chip?.dataset.rpGroupId) return;
 				e.preventDefault();
-				this.toggleCollapse(chip.dataset.rpGroupId);
+				this.chipToggle(chip.dataset.rpGroupId);
 			},
 			{ capture: true },
 		);
+	}
+
+	/** Toggle collapse, coalescing the pointerdown + click of one physical press
+	 * (a few ms apart) while still allowing distinct clicks (>80ms apart). */
+	private chipToggle(groupId: string): void {
+		const now = Date.now();
+		if (now - (this.recentToggles.get(groupId) ?? 0) < 80) return;
+		this.recentToggles.set(groupId, now);
+		this.toggleCollapse(groupId);
 	}
 
 	private showChipMenu(groupId: string, evt: MouseEvent): void {
