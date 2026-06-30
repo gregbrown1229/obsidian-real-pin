@@ -23,9 +23,10 @@ body.real-pin-compact-pinned-tabs
 	 * instead. The cap is driven by the `--real-pin-compact-tab-width` variable,
 	 * which the plugin sets from the "Compact tab width" settings slider (the
 	 * fallback here only applies before the plugin sets it). `min-width: 0` lets
-	 * the cap take effect. */
+	 * the cap take effect. The body class + `:has()` give this rule enough
+	 * specificity to win over Obsidian's default cap, so no `!important` needed. */
 	min-width: 0;
-	max-width: var(--real-pin-compact-tab-width, 72px) !important;
+	max-width: var(--real-pin-compact-tab-width, 72px);
 }
 
 body.real-pin-compact-pinned-tabs
