@@ -15,6 +15,16 @@ Because it hooks the command rather than a specific key, it works no matter whic
 
 The toggle takes effect immediately — no reload needed.
 
+**Compact pinned tabs** (default: off)
+
+Shrinks every pinned tab to just its icon, so a row of pinned tabs reads as a compact icon strip.
+
+- **No dependencies.** It keys on Obsidian's own pin indicator, so it's pure CSS — there's no per-tab JavaScript, no reliance on another plugin, and nothing to go out of sync.
+- For a row of *distinct* icons, assign them with an icon plugin such as **[Iconize](https://github.com/FlorianWoelki/obsidian-iconize)**. A pinned tab without a custom icon simply shows Obsidian's default file icon.
+- The title isn't lost: Obsidian still shows it as a hover tooltip and exposes it to screen readers via the tab's `aria-label`. The close “×” and right-click menu still work.
+- Works in popped-out windows too. Takes effect immediately — no reload needed. Turning it off (or disabling Real Pin) restores every tab.
+- Use the **Compact tab width** slider in settings to choose how narrow a compacted tab gets (it drives the `--real-pin-compact-tab-width` CSS variable, default `72px`). Obsidian grows tabs to fill the bar and won't size them to their content, so the width is a cap rather than a true shrink-to-fit.
+
 ## Scope
 
 - ✅ `Cmd+W` / `Ctrl+W` and any custom hotkey bound to **Close current tab**
@@ -24,8 +34,8 @@ The toggle takes effect immediately — no reload needed.
 
 ## Install (manual)
 
-1. Build or download `main.js` and `manifest.json`.
-2. Copy both into `<your-vault>/.obsidian/plugins/real-pin/`.
+1. Build or download `main.js`, `manifest.json`, and `styles.css`.
+2. Copy all three into `<your-vault>/.obsidian/plugins/real-pin/`.
 3. In Obsidian, open **Settings → Community plugins**, reload plugins, and enable **Real Pin**.
 
 ## Develop
@@ -36,6 +46,19 @@ npm run dev         # esbuild watch → main.js
 npm run build       # typecheck + production bundle
 npm run check       # the full gate: validate + lint + typecheck + test
 ```
+
+Every change ships production-ready — see [CONTRIBUTING.md](CONTRIBUTING.md) for the bar (strict types, the green `npm run check` gate, pure logic unit-tested under `node --test`, clean teardown, accessibility, and packaging kept in sync).
+
+### End-to-end tests
+
+`npm run test:e2e` drives the compact-pinned-tabs feature in a **real, headless Obsidian** — the automated form of manually pinning tabs in the app. It launches a sandboxed Obsidian via [`obsidian-launcher`](https://www.npmjs.com/package/obsidian-launcher) and drives the renderer over the Chrome DevTools Protocol (Obsidian's packaged-Electron build blocks Playwright, so we use raw CDP, as the Obsidian CLI and WebdriverIO do). It asserts the real behavior: pinning shrinks a tab and hides its title, an unpinned tab is untouched, pin/unpin is reactive, the width slider drives the cap, and the toggle fully reverts.
+
+```bash
+npm run build         # the test installs the built plugin, so build first
+npm run test:e2e      # needs a display; on a headless box wrap it: xvfb-run -a npm run test:e2e
+```
+
+The first run downloads Obsidian (cached afterward under `.obsidian-cache/`). These tests are heavier and slower than the unit gate, so they run in a **separate workflow** ([`e2e.yml`](.github/workflows/e2e.yml), nightly + manual) and are **not** part of the required `check` gate.
 
 ### Publishing-rule enforcement
 

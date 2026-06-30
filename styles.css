@@ -1,0 +1,52 @@
+/*
+ * Real Pin — compact pinned tabs.
+ *
+ * This feature is (almost) pure CSS. Obsidian renders a pin element —
+ * `.workspace-tab-header-status-icon.mod-pinned` — inside a tab header only when
+ * the tab is pinned, so `:has()` selects pinned tabs directly: no JavaScript
+ * marker class, no per-tab reconcile. Everything here is also gated on the
+ * `real-pin-compact-pinned-tabs` body class, which the plugin toggles from the
+ * "Compact pinned tabs" setting, so the stylesheet is inert until enabled.
+ *
+ * We never hide or zero-width the header itself — that would also kill the icon
+ * and the close-button / context-menu hit target. We hide the title text and cap
+ * the header width so the tab shrinks to roughly its icon. Hiding the visible
+ * title costs no accessibility: Obsidian sets the tab header's own `aria-label`
+ * to the title and shows it as a hover tooltip, both untouched here.
+ */
+
+body.real-pin-compact-pinned-tabs
+	.workspace-tab-header:has(.workspace-tab-header-status-icon.mod-pinned) {
+	/* Obsidian grows tab headers to fill the bar (`flex: 1 1 0`) and its layout
+	 * won't size them to their content (every fit/min/max-content attempt
+	 * collapses to padding width and clips the sticky pin), so we cap the width
+	 * instead. The cap is driven by the `--real-pin-compact-tab-width` variable,
+	 * which the plugin sets from the "Compact tab width" settings slider (the
+	 * fallback here only applies before the plugin sets it). `min-width: 0` lets
+	 * the cap take effect. */
+	min-width: 0;
+	max-width: var(--real-pin-compact-tab-width, 72px) !important;
+}
+
+body.real-pin-compact-pinned-tabs
+	.workspace-tab-header:has(.workspace-tab-header-status-icon.mod-pinned)
+	.workspace-tab-header-inner-title {
+	display: none;
+}
+
+body.real-pin-compact-pinned-tabs
+	.workspace-tab-header:has(.workspace-tab-header-status-icon.mod-pinned)
+	.workspace-tab-header-inner {
+	/* Keep Obsidian's natural left/right inset (don't override padding), and add
+	 * room between the icon and the pin — the pin is the unpin button, so it
+	 * needs space not to feel cramped or be easy to mis-click. */
+	gap: var(--size-4-2);
+}
+
+body.real-pin-compact-pinned-tabs
+	.workspace-tab-header:has(.workspace-tab-header-status-icon.mod-pinned)
+	.workspace-tab-header-inner-icon {
+	/* Spacing to the pin is the flex `gap`; drop the icon's default end margin so
+	 * it isn't doubled. */
+	margin: 0;
+}
