@@ -73,9 +73,9 @@ export class TabGroupController {
 	private saveTimer: number | null = null;
 	/** Signature of the last persisted group state, to avoid redundant writes. */
 	private lastSig = "";
-	/** Documents we've already wired delegated chip listeners onto. */
-	private readonly delegatedDocs = new WeakSet<Document>();
-	/** Last chip-toggle time per group, to dedupe pointerdown + click. */
+	/** Windows we've already wired delegated chip listeners onto. */
+	private readonly delegatedWindows = new WeakSet<Window>();
+	/** Last chip-toggle time per group, to dedupe pointerdown/mousedown/click. */
 	private readonly recentToggles = new Map<string, number>();
 
 	constructor(plugin: RealPinPlugin) {
@@ -577,7 +577,8 @@ export class TabGroupController {
 			newTagged.add(header);
 		}
 
-		this.attachDelegation(strip.ownerDocument);
+		const view = strip.ownerDocument.defaultView;
+		if (view) this.attachDelegation(view);
 
 		for (const g of groups) {
 			const firstId = order.find((m) => groupOf.get(m) === g.id);
@@ -608,26 +609,27 @@ export class TabGroupController {
 	}
 
 	/**
-	 * Wire chip interactions via ONE capture-phase delegated listener per window
-	 * document, keyed off `data-rp-group-id`. Document-level capture runs before
-	 * any of Obsidian's descendant handlers (so it can't be pre-empted), and a
-	 * data attribute survives Obsidian cloning the chip (per-element listeners
-	 * don't). We toggle on pointerdown, NOT click: a real press makes Obsidian
-	 * re-render the strip (replacing our chip), so mousedown/mouseup land on
-	 * different elements and no `click` fires on the chip — pointerdown fires on
-	 * the chip first, before any re-render.
+	 * Wire chip interactions via capture-phase delegated listeners on the WINDOW,
+	 * keyed off `data-rp-group-id`.
+	 *
+	 * Why the window, and why several event types: newer Obsidian starts its tab
+	 * drag from a window-level capture handler on the left-button press and stops
+	 * the event's propagation, so a `document`-level or element listener never
+	 * sees it (right-click / `contextmenu` isn't dragged, so that always reached
+	 * us — the tell that the left press was being swallowed). Listening on the
+	 * window in capture phase means `stopPropagation()` by Obsidian's same-target
+	 * handler doesn't silence us, and we try pointerdown/mousedown/click so
+	 * whichever a given version lets through wins. `chipToggle` dedupes them. The
+	 * `data-*` key also survives Obsidian cloning the chip (which drops
+	 * per-element listeners).
 	 */
-	private attachDelegation(doc: Document): void {
-		if (this.delegatedDocs.has(doc)) return;
-		this.delegatedDocs.add(doc);
+	private attachDelegation(view: Window): void {
+		if (this.delegatedWindows.has(view)) return;
+		this.delegatedWindows.add(view);
 		const chipOf = (e: Event): HTMLElement | null => {
 			const target = e.target as HTMLElement | null;
 			return target?.closest<HTMLElement>(".real-pin-group-chip") ?? null;
 		};
-		// Toggle on BOTH pointerdown and click, deduped: depending on the Obsidian
-		// version, either may be the one that actually reaches us for a left press
-		// (its tab-drag can swallow one or the other). `chipToggle` ignores a
-		// repeat within a short window so we never double-toggle.
 		const onLeftPress = (e: MouseEvent): void => {
 			if (e.button !== 0) return;
 			const chip = chipOf(e);
@@ -636,12 +638,17 @@ export class TabGroupController {
 			e.stopPropagation();
 			this.chipToggle(chip.dataset.rpGroupId);
 		};
-		this.plugin.registerDomEvent(doc, "pointerdown", onLeftPress, {
+		this.plugin.registerDomEvent(view, "pointerdown", onLeftPress, {
 			capture: true,
 		});
-		this.plugin.registerDomEvent(doc, "click", onLeftPress, { capture: true });
+		this.plugin.registerDomEvent(view, "mousedown", onLeftPress, {
+			capture: true,
+		});
+		this.plugin.registerDomEvent(view, "click", onLeftPress, {
+			capture: true,
+		});
 		this.plugin.registerDomEvent(
-			doc,
+			view,
 			"contextmenu",
 			(e) => {
 				const chip = chipOf(e);
@@ -653,7 +660,7 @@ export class TabGroupController {
 			{ capture: true },
 		);
 		this.plugin.registerDomEvent(
-			doc,
+			view,
 			"keydown",
 			(e) => {
 				if (e.key !== "Enter" && e.key !== " ") return;
