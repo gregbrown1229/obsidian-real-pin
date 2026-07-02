@@ -116,10 +116,11 @@ export class GroupSuggestModal extends SuggestModal<GroupChoice> {
 		app: App,
 		groups: readonly TabGroup[],
 		onChoose: (choice: GroupChoice) => void,
+		includeNew = true,
 	) {
 		super(app);
 		this.choices = [
-			{ kind: "new" },
+			...(includeNew ? [{ kind: "new" } as GroupChoice] : []),
 			...groups.map((group): GroupChoice => ({ kind: "group", group })),
 		];
 		this.onChoose = onChoose;

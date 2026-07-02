@@ -95,6 +95,13 @@ export class TabGroupController {
 		this.plugin.registerEvent(ws.on("layout-change", () => this.schedule()));
 		this.plugin.registerEvent(ws.on("active-leaf-change", () => this.schedule()));
 		this.plugin.registerEvent(ws.on("window-open", () => this.schedule()));
+		this.plugin.registerEvent(
+			ws.on("file-menu", (menu, _file, source, leaf) => {
+				if (source === "tab-header" && leaf) {
+					this.addTabHeaderMenuItems(menu, leaf);
+				}
+			}),
+		);
 		this.plugin.register(() => this.clear());
 		this.reconcile();
 	}
@@ -221,6 +228,62 @@ export class TabGroupController {
 		if (!g.memberIds.includes(leafId)) g.memberIds.push(leafId);
 		this.groups = this.groups.filter((x) => x.memberIds.length > 0);
 		this.reconcile();
+	}
+
+	/** Remove a leaf from whatever group it's in (dropping emptied groups). */
+	removeLeafFromGroup(leafId: string): void {
+		let changed = false;
+		for (const g of this.groups) {
+			if (g.memberIds.includes(leafId)) {
+				g.memberIds = g.memberIds.filter((m) => m !== leafId);
+				changed = true;
+			}
+		}
+		this.groups = this.groups.filter((g) => g.memberIds.length > 0);
+		if (changed) this.reconcile();
+	}
+
+	/** Add our grouping items to a tab's native right-click menu. */
+	addTabHeaderMenuItems(menu: Menu, leaf: WorkspaceLeaf): void {
+		if (!this.plugin.settings.enableTabGroups || !this.isManaged(leaf)) return;
+		const leafId = id(leaf);
+		const current = this.groups.find((g) => g.memberIds.includes(leafId));
+		const others = this.groups.filter((g) => g.id !== current?.id);
+
+		menu.addSeparator();
+		menu.addItem((item) =>
+			item
+				.setTitle("Add tab to new group")
+				.setIcon("plus")
+				.onClick(() => this.createGroup([leafId])),
+		);
+		if (others.length > 0) {
+			menu.addItem((item) =>
+				item
+					.setTitle("Add tab to existing group…")
+					.setIcon("layers")
+					.onClick(() =>
+						new GroupSuggestModal(
+							this.plugin.app,
+							others,
+							(choice) => {
+								if (choice.kind === "group") {
+									this.addLeafToGroup(leafId, choice.group.id);
+								}
+							},
+							false,
+						).open(),
+					),
+			);
+		}
+		if (current) {
+			menu.addItem((item) =>
+				item
+					.setTitle("Remove tab from group")
+					.setIcon("minus")
+					.onClick(() => this.removeLeafFromGroup(leafId)),
+			);
+		}
 	}
 
 	/** Prompt for which group to add the active tab to (or make a new one). */

@@ -92,6 +92,22 @@ test("an ungrouped tab is left untouched", async () => {
 	assert.equal(c.pos, null);
 });
 
+test("add-to-group and remove-from-group (the tab-menu actions) work", async () => {
+	// Restores c to ungrouped at the end, so later tests are unaffected.
+	const r = await obs.evalInApp(`
+		const { rp, c, groupId } = window.__tg;
+		const has = () => (rp.tabGroups.getGroups().find(g => g.id === groupId) || { memberIds: [] }).memberIds.includes(c.id);
+		rp.tabGroups.addLeafToGroup(c.id, groupId);
+		await new Promise(r => setTimeout(r, 120));
+		const added = has();
+		rp.tabGroups.removeLeafFromGroup(c.id);
+		await new Promise(r => setTimeout(r, 120));
+		return { added, removed: !has() };
+	`);
+	assert.equal(r.added, true, "addLeafToGroup adds the tab to the group");
+	assert.equal(r.removed, true, "removeLeafFromGroup takes it back out");
+});
+
 test("clicking the chip collapses/expands — even after a re-render", async () => {
 	// Regression guard: Obsidian re-renders the strip by cloning its children,
 	// which drops a chip's per-element listeners. We force a re-render (activate
