@@ -73,10 +73,8 @@ export class TabGroupController {
 	private saveTimer: number | null = null;
 	/** Signature of the last persisted group state, to avoid redundant writes. */
 	private lastSig = "";
-	/** Windows we've already wired delegated chip listeners onto. */
-	private readonly delegatedWindows = new WeakSet<Window>();
-	/** Last chip-toggle time per group, to dedupe pointerdown/mousedown/click. */
-	private readonly recentToggles = new Map<string, number>();
+	/** Documents we've already wired the delegated chip click listener onto. */
+	private readonly delegatedDocs = new WeakSet<Document>();
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -577,8 +575,7 @@ export class TabGroupController {
 			newTagged.add(header);
 		}
 
-		const view = strip.ownerDocument.defaultView;
-		if (view) this.attachDelegation(view);
+		this.attachDelegation(strip.ownerDocument);
 
 		for (const g of groups) {
 			const firstId = order.find((m) => groupOf.get(m) === g.id);
@@ -609,77 +606,37 @@ export class TabGroupController {
 	}
 
 	/**
-	 * Wire chip interactions via capture-phase delegated listeners on the WINDOW,
-	 * keyed off `data-rp-group-id`.
-	 *
-	 * Why the window, and why several event types: newer Obsidian starts its tab
-	 * drag from a window-level capture handler on the left-button press and stops
-	 * the event's propagation, so a `document`-level or element listener never
-	 * sees it (right-click / `contextmenu` isn't dragged, so that always reached
-	 * us — the tell that the left press was being swallowed). Listening on the
-	 * window in capture phase means `stopPropagation()` by Obsidian's same-target
-	 * handler doesn't silence us, and we try pointerdown/mousedown/click so
-	 * whichever a given version lets through wins. `chipToggle` dedupes them. The
-	 * `data-*` key also survives Obsidian cloning the chip (which drops
-	 * per-element listeners).
+	 * One delegated listener per window document handles chip clicks (and the
+	 * right-click menu + keyboard). Delegation — rather than a listener on each
+	 * chip — because Obsidian re-renders the strip by cloning its children, which
+	 * would drop per-element listeners; the `data-rp-group-id` attribute survives
+	 * cloning, so a single document-level handler stays correct.
 	 */
-	private attachDelegation(view: Window): void {
-		if (this.delegatedWindows.has(view)) return;
-		this.delegatedWindows.add(view);
-		const chipOf = (e: Event): HTMLElement | null => {
-			const target = e.target as HTMLElement | null;
-			return target?.closest<HTMLElement>(".real-pin-group-chip") ?? null;
-		};
-		const onLeftPress = (e: MouseEvent): void => {
-			if (e.button !== 0) return;
-			const chip = chipOf(e);
-			if (!chip?.dataset.rpGroupId) return;
-			e.preventDefault();
-			e.stopPropagation();
-			this.chipToggle(chip.dataset.rpGroupId);
-		};
-		this.plugin.registerDomEvent(view, "pointerdown", onLeftPress, {
-			capture: true,
-		});
-		this.plugin.registerDomEvent(view, "mousedown", onLeftPress, {
-			capture: true,
-		});
-		this.plugin.registerDomEvent(view, "click", onLeftPress, {
-			capture: true,
-		});
-		this.plugin.registerDomEvent(
-			view,
-			"contextmenu",
-			(e) => {
-				const chip = chipOf(e);
-				if (!chip?.dataset.rpGroupId) return;
-				e.preventDefault();
-				e.stopPropagation();
-				this.showChipMenu(chip.dataset.rpGroupId, e);
-			},
-			{ capture: true },
-		);
-		this.plugin.registerDomEvent(
-			view,
-			"keydown",
-			(e) => {
-				if (e.key !== "Enter" && e.key !== " ") return;
-				const chip = chipOf(e);
-				if (!chip?.dataset.rpGroupId) return;
-				e.preventDefault();
-				this.chipToggle(chip.dataset.rpGroupId);
-			},
-			{ capture: true },
-		);
-	}
+	private attachDelegation(doc: Document): void {
+		if (this.delegatedDocs.has(doc)) return;
+		this.delegatedDocs.add(doc);
+		const groupIdOf = (e: Event): string | undefined =>
+			(e.target as HTMLElement | null)?.closest<HTMLElement>(
+				".real-pin-group-chip",
+			)?.dataset.rpGroupId;
 
-	/** Toggle collapse, coalescing the pointerdown + click of one physical press
-	 * (a few ms apart) while still allowing distinct clicks (>80ms apart). */
-	private chipToggle(groupId: string): void {
-		const now = Date.now();
-		if (now - (this.recentToggles.get(groupId) ?? 0) < 80) return;
-		this.recentToggles.set(groupId, now);
-		this.toggleCollapse(groupId);
+		this.plugin.registerDomEvent(doc, "click", (e) => {
+			const groupId = groupIdOf(e);
+			if (groupId) this.toggleCollapse(groupId);
+		});
+		this.plugin.registerDomEvent(doc, "contextmenu", (e) => {
+			const groupId = groupIdOf(e);
+			if (!groupId) return;
+			e.preventDefault();
+			this.showChipMenu(groupId, e);
+		});
+		this.plugin.registerDomEvent(doc, "keydown", (e) => {
+			if (e.key !== "Enter" && e.key !== " ") return;
+			const groupId = groupIdOf(e);
+			if (!groupId) return;
+			e.preventDefault();
+			this.toggleCollapse(groupId);
+		});
 	}
 
 	private showChipMenu(groupId: string, evt: MouseEvent): void {

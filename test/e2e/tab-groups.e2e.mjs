@@ -104,9 +104,7 @@ test("clicking the chip collapses/expands — even after a re-render", async () 
 		await new Promise(r => setTimeout(r, 220));
 		const strip = a.tabHeaderEl.parentElement;
 		const disp = () => getComputedStyle(a.tabHeaderEl).display;
-		// Drive it the way a real mouse does: a left pointerdown on the chip.
-		const press = () => strip.querySelector('.real-pin-group-chip')
-			.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, view: window }));
+		const press = () => strip.querySelector('.real-pin-group-chip').click();
 		const before = disp();
 		press();
 		await new Promise(r => setTimeout(r, 200));
