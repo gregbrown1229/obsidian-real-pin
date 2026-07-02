@@ -82,8 +82,9 @@ export class RealPinSettingTab extends PluginSettingTab {
 			.setName("Enable tab groups")
 			.setDesc(
 				"Organize tabs into named, colored, collapsible Chrome-style groups in the " +
-					"tab bar. Group a tab from its command or the group chip's menu, then drag " +
-					"tabs in or out. Takes effect immediately.",
+					"tab bar. Right-click a tab to group it (or use the commands / group chip " +
+					"menu), then drag tabs in or out. Saved groups live in the sidebar panel. " +
+					"Takes effect immediately.",
 			)
 			.addToggle((toggle) =>
 				toggle
