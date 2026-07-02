@@ -131,6 +131,15 @@ body.real-pin-tab-groups .real-pin-group-chip {
 	cursor: pointer;
 	user-select: none;
 }
+
+/* Obsidian's tab bar doubles as the draggable window title bar
+ * (`-webkit-app-region: drag`), which the OS consumes on left-press so no DOM
+ * event fires. Opt the chip (and its contents) out so left-click works. */
+body.real-pin-tab-groups .real-pin-group-chip,
+body.real-pin-tab-groups .real-pin-group-chip * {
+	-webkit-app-region: no-drag;
+	app-region: no-drag;
+}
 body.real-pin-tab-groups .real-pin-group-chip:hover {
 	background-color: color-mix(in srgb, var(--rp-c) 32%, transparent);
 }
