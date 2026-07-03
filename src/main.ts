@@ -1,7 +1,18 @@
-import { Plugin, View } from "obsidian";
+import { Plugin, View, WorkspaceLeaf } from "obsidian";
 import { around } from "monkey-around";
 import { ConfirmCloseModal } from "./ConfirmCloseModal";
 import { CompactPinnedTabs } from "./compactPinnedTabs";
+import { TabGroupController } from "./tabGroups/controller";
+import {
+	SavedGroupsView,
+	VIEW_TYPE_SAVED_GROUPS,
+} from "./tabGroups/SavedGroupsView";
+import { migrateData } from "./tabGroups/model";
+import type {
+	PersistedData,
+	PersistedLiveGroup,
+	SavedTabGroup,
+} from "./tabGroups/model";
 import {
 	DEFAULT_SETTINGS,
 	RealPinSettings,
@@ -20,6 +31,8 @@ type CommandsRegistry = { commands: Record<string, CloseCommand | undefined> };
 export default class RealPinPlugin extends Plugin {
 	settings!: RealPinSettings;
 	compactTabs!: CompactPinnedTabs;
+	tabGroups!: TabGroupController;
+	private data!: PersistedData<RealPinSettings>;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -31,18 +44,99 @@ export default class RealPinPlugin extends Plugin {
 		// every window on unload.
 		this.compactTabs = new CompactPinnedTabs(this);
 		this.app.workspace.onLayoutReady(() => this.compactTabs.start());
+
+		// Tab groups: same lifecycle — start once the layout is ready so existing
+		// tabs/popouts are picked up; `start()` registers its own teardown.
+		this.tabGroups = new TabGroupController(this);
+		this.app.workspace.onLayoutReady(() => this.tabGroups.start());
+
+		this.registerView(
+			VIEW_TYPE_SAVED_GROUPS,
+			(leaf) => new SavedGroupsView(leaf, this),
+		);
+		this.addRibbonIcon("layers", "Saved tab groups", () => {
+			void this.activateSavedGroupsView();
+		});
+
+		this.addCommand({
+			id: "new-tab-group",
+			name: "New tab group from active tab",
+			callback: () => this.tabGroups.createGroupFromActiveLeaf(),
+		});
+		this.addCommand({
+			id: "save-tab-group",
+			name: "Save the active tab's group to the library",
+			callback: () => this.tabGroups.saveActiveGroup(),
+		});
+		this.addCommand({
+			id: "open-saved-groups",
+			name: "Open the saved tab groups panel",
+			callback: () => {
+				void this.activateSavedGroupsView();
+			},
+		});
+		this.addCommand({
+			id: "add-tab-to-group",
+			name: "Add active tab to group",
+			callback: () => this.tabGroups.addActiveLeafToGroupPrompt(),
+		});
+		this.addCommand({
+			id: "edit-tab-group",
+			name: "Edit the active tab's group (name and color)",
+			callback: () => this.tabGroups.editActiveGroup(),
+		});
+		this.addCommand({
+			id: "toggle-tab-group-collapse",
+			name: "Toggle collapse of the active tab's group",
+			callback: () => this.tabGroups.toggleCollapseActive(),
+		});
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<RealPinSettings>,
-		);
+		this.data = migrateData(await this.loadData(), DEFAULT_SETTINGS);
+		this.settings = this.data.settings;
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		this.data.settings = this.settings;
+		await this.saveData(this.data);
+	}
+
+	// Tab-group persistence. Live groups are rebound to leaves on reload; saved
+	// groups are the user's reopenable library. Both share the one data file.
+	getLiveGroups(): PersistedLiveGroup[] {
+		return this.data.liveGroups;
+	}
+
+	async saveLiveGroups(groups: PersistedLiveGroup[]): Promise<void> {
+		this.data.liveGroups = groups;
+		await this.saveData(this.data);
+	}
+
+	getSavedGroups(): SavedTabGroup[] {
+		return this.data.savedGroups;
+	}
+
+	async saveSavedGroups(groups: SavedTabGroup[]): Promise<void> {
+		this.data.savedGroups = groups;
+		await this.saveData(this.data);
+	}
+
+	/** Open (or focus) the saved-groups sidebar panel. */
+	async activateSavedGroupsView(): Promise<void> {
+		const ws = this.app.workspace;
+		let leaf: WorkspaceLeaf | null =
+			ws.getLeavesOfType(VIEW_TYPE_SAVED_GROUPS)[0] ?? null;
+		if (!leaf) {
+			leaf = ws.getRightLeaf(false);
+			if (!leaf) return;
+			await leaf.setViewState({ type: VIEW_TYPE_SAVED_GROUPS, active: true });
+		}
+		// `revealLeaf` is newer than minAppVersion; call it only if present.
+		const reveal = (ws as unknown as {
+			revealLeaf?: (l: WorkspaceLeaf) => unknown;
+		}).revealLeaf;
+		if (typeof reveal === "function") reveal.call(ws, leaf);
 	}
 
 	private patchCloseCommand(): void {

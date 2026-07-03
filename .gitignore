@@ -3,3 +3,6 @@ main.js
 *.log
 .DS_Store
 .obsidian-cache/
+
+# Spike screenshots (generated)
+test/e2e/spikes/*.png
