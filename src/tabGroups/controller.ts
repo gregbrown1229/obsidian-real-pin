@@ -88,16 +88,8 @@ export class TabGroupController {
 	private readonly delegatedDocs = new WeakSet<Document>();
 	/** The group being dragged by its pill (HTML5 drag), or null. */
 	private draggingGroupId: string | null = null;
-	/**
-	 * Each group's collapsed state captured when a pill drag folds them all, so
-	 * they can be restored on drop/cancel; null when no pill drag is folding them.
-	 */
-	private groupDragRestore: Map<string, boolean> | null = null;
-	/**
-	 * Pending rAF that folds the groups one frame after a pill drag starts, with
-	 * the window it was scheduled on (a popout has its own — cancel must match).
-	 */
-	private collapseRaf: { view: Window; id: number } | null = null;
+	/** Insertion marker shown while dragging a pill (where the group will land). */
+	private dropIndicator: HTMLElement | null = null;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -200,11 +192,10 @@ export class TabGroupController {
 	/**
 	 * Expand the group the newly-focused leaf belongs to (Chrome auto-expands a
 	 * collapsed group when one of its tabs becomes active). Only flips the flag;
-	 * the scheduled reconcile repaints. No-op mid pill-drag, where we keep
-	 * everything folded on purpose.
+	 * the scheduled reconcile repaints.
 	 */
 	private expandGroupOf(leaf: WorkspaceLeaf | null): void {
-		if (!this.plugin.settings.enableTabGroups || this.groupDragRestore) return;
+		if (!this.plugin.settings.enableTabGroups) return;
 		if (!leaf) return;
 		const g = this.groups.find((x) => x.memberIds.includes(id(leaf)));
 		if (g && g.collapsed) g.collapsed = false;
@@ -596,9 +587,6 @@ export class TabGroupController {
 	 * signature so unchanged reconciles (e.g. active-leaf-change) don't write.
 	 */
 	private schedulePersist(): void {
-		// Don't persist the transient all-collapsed state a pill drag installs;
-		// the real state is written when the drag restores it.
-		if (this.groupDragRestore) return;
 		if (this.saveTimer !== null) return;
 		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = null;
@@ -816,7 +804,10 @@ export class TabGroupController {
 			this.toggleCollapse(groupId);
 		});
 
-		// Drag the pill to reorder the whole group (HTML5 drag).
+		// Drag the pill to reorder the whole group (HTML5 drag). We touch nothing
+		// in dragstart — mutating the DOM there aborts Chromium's native drag. The
+		// chip itself is the drag ghost; a drop indicator (positioned in dragover)
+		// shows where the group will land.
 		this.plugin.registerDomEvent(doc, "dragstart", (e) => {
 			const groupId = groupIdOf(e);
 			if (!groupId) return;
@@ -825,31 +816,24 @@ export class TabGroupController {
 				e.dataTransfer.effectAllowed = "move";
 				e.dataTransfer.setData("text/plain", groupId);
 			}
-			// Fold every group to just its chip so you rearrange them without
-			// minding how many tabs each holds. This MUST be deferred: mutating the
-			// DOM inside dragstart makes Chromium/Electron abort the native drag
-			// (bug 168544). A frame later the drag is established and safe to touch.
-			const view = doc.defaultView;
-			if (view) {
-				const id = view.requestAnimationFrame(() => {
-					this.collapseRaf = null;
-					if (this.draggingGroupId === groupId) this.collapseAllForDrag();
-				});
-				this.collapseRaf = { view, id };
-			}
 		});
 		this.plugin.registerDomEvent(doc, "dragover", (e) => {
 			if (!this.draggingGroupId) return;
 			const overStrip = (e.target as HTMLElement | null)?.closest?.(
 				".workspace-tab-header-container-inner",
 			);
-			if (!overStrip) return;
+			if (!overStrip) {
+				this.hideDropIndicator();
+				return;
+			}
 			e.preventDefault(); // allow drop
 			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+			this.showDropIndicator(e);
 		});
 		this.plugin.registerDomEvent(doc, "drop", (e) => {
 			const groupId = this.draggingGroupId;
 			this.draggingGroupId = null;
+			this.hideDropIndicator();
 			if (!groupId) return;
 			const strip = (e.target as HTMLElement | null)?.closest?.(
 				".workspace-tab-header-container-inner",
@@ -858,50 +842,78 @@ export class TabGroupController {
 				e.preventDefault();
 				this.moveGroup(groupId, this.dropBeforeLeafId(e));
 			}
-			this.restoreAfterGroupDrag();
 		});
 		this.plugin.registerDomEvent(doc, "dragend", () => {
 			this.draggingGroupId = null;
-			this.restoreAfterGroupDrag();
+			this.hideDropIndicator();
 		});
 	}
 
 	/**
-	 * Fold every group to just its chip for the duration of a pill drag,
-	 * remembering each group's prior state. Only ever called from a deferred
-	 * (post-dragstart) callback so it can't abort the native drag.
+	 * Draw the insertion marker exactly where the group will land — the same spot
+	 * `dropBeforeLeafId` resolves, so it honors the snap-to-group-boundary rule
+	 * rather than the raw hover position. Positioned with `fixed` coordinates so
+	 * it needs no positioned ancestor. Mutating the DOM here is safe: the drag is
+	 * already in progress (this never runs during dragstart).
 	 */
-	private collapseAllForDrag(): void {
-		if (!this.plugin.settings.enableTabGroups) return;
-		this.groupDragRestore = new Map(
-			this.groups.map((g) => [g.id, g.collapsed] as const),
+	private showDropIndicator(e: DragEvent): void {
+		const strip = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+			".workspace-tab-header-container-inner",
 		);
-		let changed = false;
-		for (const g of this.groups) {
-			if (!g.collapsed) {
-				g.collapsed = true;
-				changed = true;
-			}
+		const anchor = strip ? this.dropAnchor(e, strip) : null;
+		if (!anchor) {
+			this.hideDropIndicator();
+			return;
 		}
-		if (changed) this.reconcile();
+		const doc = (strip as HTMLElement).ownerDocument;
+		let bar = this.dropIndicator;
+		if (!bar || bar.ownerDocument !== doc) {
+			bar?.remove();
+			bar = doc.createElement("div");
+			bar.className = "real-pin-group-drop-indicator";
+			doc.body.appendChild(bar);
+			this.dropIndicator = bar;
+		}
+		bar.style.left = `${Math.round(anchor.x)}px`;
+		bar.style.top = `${Math.round(anchor.top)}px`;
+		bar.style.height = `${Math.round(anchor.height)}px`;
 	}
 
-	/** Restore each group's pre-drag collapsed state after a pill drag ends. */
-	private restoreAfterGroupDrag(): void {
-		this.cancelCollapseRaf();
-		const restore = this.groupDragRestore;
-		if (!restore) return;
-		this.groupDragRestore = null;
-		let changed = false;
-		for (const g of this.groups) {
-			const was = restore.get(g.id);
-			if (was !== undefined && g.collapsed !== was) {
-				g.collapsed = was;
-				changed = true;
+	/** Viewport x + vertical extent of the insertion line for the current drop. */
+	private dropAnchor(
+		e: DragEvent,
+		strip: HTMLElement,
+	): { x: number; top: number; height: number } | null {
+		const beforeLeafId = this.dropBeforeLeafId(e);
+		if (beforeLeafId !== null) {
+			const leaf = this.leafById(beforeLeafId);
+			const header = leaf ? headerEl(leaf) : undefined;
+			if (header) {
+				// Landing before a group means landing before its chip, which sits
+				// immediately before that group's first-member header.
+				const prev = header.previousElementSibling as HTMLElement | null;
+				const el = prev?.classList.contains("real-pin-group-chip")
+					? prev
+					: header;
+				const r = el.getBoundingClientRect();
+				return { x: r.left, top: r.top, height: r.height };
 			}
 		}
-		if (changed) this.reconcile();
-		else this.schedulePersist();
+		// End of the strip: draw at the right edge of the last tab.
+		const headers = strip.querySelectorAll<HTMLElement>(
+			":scope > .workspace-tab-header",
+		);
+		const last = headers[headers.length - 1];
+		if (last) {
+			const r = last.getBoundingClientRect();
+			return { x: r.right, top: r.top, height: r.height };
+		}
+		return null;
+	}
+
+	private hideDropIndicator(): void {
+		this.dropIndicator?.remove();
+		this.dropIndicator = null;
 	}
 
 	/** The leaf a pill-drop should land the group *before* (null = end of strip). */
@@ -1064,7 +1076,7 @@ export class TabGroupController {
 		this.cancelScheduled();
 		this.disconnectObservers();
 		this.draggingGroupId = null;
-		this.groupDragRestore = null;
+		this.hideDropIndicator();
 		for (const header of this.tagged) clearHeaderAttrs(header);
 		this.tagged = new Set();
 		for (const chip of this.chips.values()) chip.remove();
@@ -1124,15 +1136,6 @@ export class TabGroupController {
 		if (this.saveTimer !== null) {
 			window.clearTimeout(this.saveTimer);
 			this.saveTimer = null;
-		}
-		this.cancelCollapseRaf();
-	}
-
-	/** Cancel a pending fold-on-drag frame callback on its own window. */
-	private cancelCollapseRaf(): void {
-		if (this.collapseRaf) {
-			this.collapseRaf.view.cancelAnimationFrame(this.collapseRaf.id);
-			this.collapseRaf = null;
 		}
 	}
 }

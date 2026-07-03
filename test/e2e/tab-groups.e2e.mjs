@@ -335,45 +335,43 @@ test("dragging a group past another reorders as blocks, never splitting it", asy
 	assert.equal(r.g1AfterG2, true, "the dragged group moved entirely past the other");
 });
 
-test("starting a pill drag folds every group (deferred) and restores on dragend", async () => {
-	// The collapse is scheduled a frame after dragstart (mutating the DOM *in*
-	// dragstart aborts the native drag). We can't script a real OS drag, but we
-	// can verify the deferred fold+restore logic fires.
+test("dragging a pill shows a drop indicator that clears when the drag ends", async () => {
 	const r = await obs.evalInApp(`
 		const app = window.app;
 		const rp = app.plugins.plugins['real-pin'];
 		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
-		for (const p of ['fd-1.md','fd-2.md','fd-3.md','fd-4.md']) await ensure(p);
+		for (const p of ['di-1.md','di-2.md','di-3.md','di-4.md']) await ensure(p);
 		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
-		const a = await open('fd-1.md'), b = await open('fd-2.md'), c = await open('fd-3.md'), d = await open('fd-4.md');
+		const a = await open('di-1.md'), b = await open('di-2.md'), c = await open('di-3.md'), d = await open('di-4.md');
 		await new Promise(r => setTimeout(r, 150));
 		const g1 = rp.tabGroups.createGroup([a.id, b.id]);
 		const g2 = rp.tabGroups.createGroup([c.id, d.id]);
 		await new Promise(r => setTimeout(r, 150));
 		const strip = a.tabHeaderEl.parentElement;
 		const chip1 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g1.id + '"]');
-		const collapsedOf = (gid) => (rp.tabGroups.getGroups().find(x => x.id === gid) || {}).collapsed;
+		const chip2 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g2.id + '"]');
+		const sel = () => activeDocument.querySelector('.real-pin-group-drop-indicator');
 		const dt = new DataTransfer();
 		chip1.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-		await new Promise(r => setTimeout(r, 180)); // let the rAF fire + reconcile
-		const duringG1 = collapsedOf(g1.id), duringG2 = collapsedOf(g2.id);
-		const memberHidden = getComputedStyle(c.tabHeaderEl).display === 'none';
-		const chipVisible = getComputedStyle(chip1).display !== 'none';
+		const rect = chip2.getBoundingClientRect();
+		const at = { bubbles: true, dataTransfer: dt, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 };
+		chip2.dispatchEvent(new DragEvent('dragover', at));
+		await new Promise(r => setTimeout(r, 40));
+		const ind = sel();
+		const shown = !!ind;
+		const positioned = !!ind && ind.style.left !== '' && parseFloat(ind.style.height) > 0;
 		chip1.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
-		await new Promise(r => setTimeout(r, 180));
-		const afterG1 = collapsedOf(g1.id), afterG2 = collapsedOf(g2.id);
-		const out = { duringG1, duringG2, memberHidden, chipVisible, afterG1, afterG2 };
+		await new Promise(r => setTimeout(r, 40));
+		const goneAfter = !sel();
+		const out = { shown, positioned, goneAfter };
 		rp.tabGroups.ungroup(g1.id); rp.tabGroups.ungroup(g2.id);
 		a.detach(); b.detach(); c.detach(); d.detach();
 		await new Promise(r => setTimeout(r, 100));
 		return out;
 	`);
-	assert.equal(r.duringG1, true, "the dragged group folds");
-	assert.equal(r.duringG2, true, "every other group also folds during the drag");
-	assert.equal(r.memberHidden, true, "member tabs are hidden while dragging");
-	assert.equal(r.chipVisible, true, "the dragged chip itself stays visible (so the drag survives)");
-	assert.equal(r.afterG1, false, "the dragged group's state is restored");
-	assert.equal(r.afterG2, false, "other groups' states are restored");
+	assert.equal(r.shown, true, "a drop indicator appears while dragging over the bar");
+	assert.equal(r.positioned, true, "the indicator is positioned at the drop point");
+	assert.equal(r.goneAfter, true, "the indicator is removed when the drag ends");
 });
 
 test("dragging a single-tab group onto another does not merge it in", async () => {

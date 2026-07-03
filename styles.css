@@ -143,6 +143,19 @@ body.real-pin-tab-groups .real-pin-group-chip * {
 body.real-pin-tab-groups .real-pin-group-chip:hover {
 	background-color: color-mix(in srgb, var(--rp-c) 32%, transparent);
 }
+
+/* Insertion marker shown while dragging a group chip: a thin accent bar at the
+ * spot the group will land. The controller sets left/top/height inline (fixed
+ * viewport coords); it never blocks the drop target. */
+body.real-pin-tab-groups .real-pin-group-drop-indicator {
+	position: fixed;
+	width: 2px;
+	margin-left: -1px;
+	background-color: var(--interactive-accent);
+	border-radius: 1px;
+	pointer-events: none;
+	z-index: var(--layer-popover);
+}
 body.real-pin-tab-groups .real-pin-group-chip-dot {
 	width: 8px;
 	height: 8px;
