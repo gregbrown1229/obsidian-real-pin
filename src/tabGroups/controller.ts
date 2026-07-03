@@ -8,7 +8,6 @@ import {
 	reconcile as reconcileMembership,
 } from "./model";
 import type {
-	ChipBoundaries,
 	GroupColor,
 	GroupPos,
 	PersistedLiveGroup,
@@ -89,14 +88,6 @@ export class TabGroupController {
 	private readonly delegatedDocs = new WeakSet<Document>();
 	/** The group being dragged by its pill (HTML5 drag), or null. */
 	private draggingGroupId: string | null = null;
-	/**
-	 * Set while our own leaf-move helpers reconcile. Chip-boundary inference reads
-	 * chip DOM positions, which are momentarily stale mid-move (renderStrip hasn't
-	 * re-placed them yet) — we already know the intended membership, so we skip the
-	 * inference for these passes. It stays on only for *native* reorders.
-	 */
-	private skipBoundaries = false;
-	private boundarySuppressTimer: number | null = null;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -199,8 +190,7 @@ export class TabGroupController {
 	/**
 	 * Expand the group the newly-focused leaf belongs to (Chrome auto-expands a
 	 * collapsed group when one of its tabs becomes active). Only flips the flag;
-	 * the scheduled reconcile repaints. No-op mid pill-drag, where we deliberately
-	 * keep everything collapsed.
+	 * the scheduled reconcile repaints.
 	 */
 	private expandGroupOf(leaf: WorkspaceLeaf | null): void {
 		if (!this.plugin.settings.enableTabGroups) return;
@@ -282,7 +272,7 @@ export class TabGroupController {
 				this.moveLeafAfter(leaf, order[Math.max(...otherPos)]);
 			}
 		}
-		this.reconcileAfterMove();
+		this.reconcile();
 	}
 
 	/**
@@ -313,7 +303,7 @@ export class TabGroupController {
 				}
 			}
 		}
-		this.reconcileAfterMove();
+		this.reconcile();
 	}
 
 	/** Add our grouping items to a tab's native right-click menu. */
@@ -649,27 +639,6 @@ export class TabGroupController {
 		return changed;
 	}
 
-	/**
-	 * Reconcile after one of our own leaf moves, with chip-boundary inference off.
-	 * The membership is already decided here; and crucially the move's DOM reorder
-	 * lands *asynchronously*, so the observer fires a second reconcile once it
-	 * settles — by which point a stray chip sitting before a passing tab looks
-	 * exactly like a native "dropped inside the group" and would wrongly absorb it.
-	 * We keep inference suppressed across that settle window. Native drags never
-	 * take this path, so they still infer normally.
-	 */
-	private reconcileAfterMove(): void {
-		this.skipBoundaries = true;
-		this.reconcile();
-		if (this.boundarySuppressTimer !== null) {
-			window.clearTimeout(this.boundarySuppressTimer);
-		}
-		this.boundarySuppressTimer = window.setTimeout(() => {
-			this.boundarySuppressTimer = null;
-			this.skipBoundaries = false;
-		}, 300);
-	}
-
 	private reconcile(): void {
 		if (!this.plugin.settings.enableTabGroups) {
 			this.clear();
@@ -706,10 +675,7 @@ export class TabGroupController {
 				g.memberIds.some((m) => headerById.has(m)),
 			);
 			const prev = this.prevOrder.get(parent) ?? order;
-			const boundaries = this.skipBoundaries
-				? undefined
-				: chipBoundaries(strip, headerById);
-			const result = reconcileMembership(here, prev, order, boundaries);
+			const result = reconcileMembership(here, prev, order);
 
 			const stale = new Set(here);
 			this.groups = this.groups
@@ -992,7 +958,7 @@ export class TabGroupController {
 			const target = from < to ? to - 1 : to;
 			if (from !== target) moveLeafToIndex(leaf, target);
 		}
-		this.reconcileAfterMove();
+		this.reconcile();
 	}
 
 	private showChipMenu(groupId: string, evt: MouseEvent): void {
@@ -1091,11 +1057,6 @@ export class TabGroupController {
 			window.clearTimeout(this.saveTimer);
 			this.saveTimer = null;
 		}
-		if (this.boundarySuppressTimer !== null) {
-			window.clearTimeout(this.boundarySuppressTimer);
-			this.boundarySuppressTimer = null;
-			this.skipBoundaries = false;
-		}
 	}
 }
 
@@ -1130,43 +1091,6 @@ function readOrder(
 			headerById.set(leafId, header);
 		});
 	return { order, headerById };
-}
-
-/**
- * Read where each group's chip sits relative to tabs, by walking the strip's
- * children in order. A chip carries its group id in `data-rp-group-id`; a header
- * maps to a leaf id via `headerById`. We only record chip↔tab adjacencies, which
- * is all the drag inference needs (the chip is a group's left boundary).
- */
-function chipBoundaries(
-	strip: HTMLElement,
-	headerById: Map<string, HTMLElement>,
-): ChipBoundaries {
-	const idByHeader = new Map<HTMLElement, string>();
-	for (const [leafId, header] of headerById) idByHeader.set(header, leafId);
-
-	const leftChip = new Map<string, string>();
-	const rightChip = new Map<string, string>();
-	let prevChip: string | undefined;
-	let prevTab: string | undefined;
-
-	for (const el of Array.from(strip.children) as HTMLElement[]) {
-		const chipGroup = el.classList.contains("real-pin-group-chip")
-			? el.dataset.rpGroupId
-			: undefined;
-		const tabId = chipGroup ? undefined : idByHeader.get(el);
-		if (chipGroup === undefined && tabId === undefined) continue; // ignore others
-
-		if (prevChip !== undefined && tabId !== undefined) {
-			leftChip.set(tabId, prevChip);
-		}
-		if (prevTab !== undefined && chipGroup !== undefined) {
-			rightChip.set(prevTab, chipGroup);
-		}
-		prevChip = chipGroup;
-		prevTab = tabId;
-	}
-	return { leftChip, rightChip };
 }
 
 function newId(): string {

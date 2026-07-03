@@ -183,21 +183,6 @@ export interface ReconcileResult {
 }
 
 /**
- * Where each group's chip sits relative to individual tabs, so the chip can act
- * as the group's left boundary during drag inference (the chip isn't a tab, so
- * it never appears in the tab order otherwise).
- *
- * - `leftChip[tabId] = gid` — group `gid`'s chip is immediately to this tab's
- *   left, i.e. the tab sits *just inside* that group's left edge → it joins.
- * - `rightChip[tabId] = gid` — that chip is immediately to this tab's right, i.e.
- *   the tab sits *just outside*, to the left of the group → it stays out.
- */
-export interface ChipBoundaries {
-	leftChip: ReadonlyMap<string, string>;
-	rightChip: ReadonlyMap<string, string>;
-}
-
-/**
  * The group a moved tab should belong to after landing at its new spot, given
  * current membership. Applies the `groupForMoved` rule plus singleton
  * protection: dragging the sole member of a group never dissolves it (Chrome
@@ -207,21 +192,12 @@ function computeNext(
 	moved: string,
 	groupOf: ReadonlyMap<string, string>,
 	newOrder: readonly string[],
-	boundaries?: ChipBoundaries,
 ): string | undefined {
 	const i = newOrder.indexOf(moved);
 	const leftId = i > 0 ? newOrder[i - 1] : undefined;
 	const rightId = i < newOrder.length - 1 ? newOrder[i + 1] : undefined;
-	let leftGroup = leftId !== undefined ? groupOf.get(leftId) : undefined;
-	let rightGroup = rightId !== undefined ? groupOf.get(rightId) : undefined;
-	// A group's chip is its left boundary. If the tab landed just right of a
-	// chip, treat that group as its left neighbor (so it joins); if just left of
-	// a chip, that group isn't a neighbor at all (so it stays out).
-	if (boundaries) {
-		const lc = boundaries.leftChip.get(moved);
-		if (lc !== undefined) leftGroup = lc;
-		if (boundaries.rightChip.has(moved)) rightGroup = undefined;
-	}
+	const leftGroup = leftId !== undefined ? groupOf.get(leftId) : undefined;
+	const rightGroup = rightId !== undefined ? groupOf.get(rightId) : undefined;
 	const prevGroup = groupOf.get(moved);
 	let next = groupForMoved(leftGroup, rightGroup, prevGroup);
 	if (next === undefined && prevGroup !== undefined) {
@@ -249,7 +225,6 @@ export function reconcile(
 	groups: readonly TabGroup[],
 	prevOrder: readonly string[],
 	newOrder: readonly string[],
-	boundaries?: ChipBoundaries,
 ): ReconcileResult {
 	const newSet = new Set(newOrder);
 	const prevSet = new Set(prevOrder);
@@ -274,7 +249,7 @@ export function reconcile(
 		let best = candidates[0];
 		let bestScore = -1;
 		for (const c of candidates) {
-			const next = computeNext(c, groupOf, newOrder, boundaries);
+			const next = computeNext(c, groupOf, newOrder);
 			const changed = next !== groupOf.get(c);
 			const score = !changed ? 0 : next !== undefined ? 2 : 1;
 			if (score > bestScore) {
@@ -282,7 +257,7 @@ export function reconcile(
 				best = c;
 			}
 		}
-		const next = computeNext(best, groupOf, newOrder, boundaries);
+		const next = computeNext(best, groupOf, newOrder);
 		if (next === undefined) groupOf.delete(best);
 		else groupOf.set(best, next);
 	}

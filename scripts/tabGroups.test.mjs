@@ -91,31 +91,13 @@ test("reconcile: dragging an ungrouped tab inside a group joins it", () => {
 	assert.deepEqual(r.ungrouped, []);
 });
 
-test("reconcile: a tab dropped just right of a group's chip joins as its new first member", () => {
-	const groups = [group("G", ["m1", "m2"])];
-	// x lands before m1; the chip sits immediately to x's LEFT, so x is just
-	// inside the group's left edge → it joins.
-	const boundaries = { leftChip: new Map([["x", "G"]]), rightChip: new Map() };
-	const r = reconcile(groups, ["m1", "m2", "x"], ["x", "m1", "m2"], boundaries);
-	assert.deepEqual(r.groups[0].memberIds, ["x", "m1", "m2"]);
-	assert.deepEqual(r.ungrouped, []);
-});
-
-test("reconcile: the same drop with no chip on its left stays ungrouped (edge growth isn't inferred)", () => {
+test("reconcile: dropping a tab at a group's edge does not absorb it", () => {
+	// Predictable rule: a tab joins only when dropped *between* a group's tabs.
+	// Landing at the group's outer edge leaves it ungrouped.
 	const groups = [group("G", ["m1", "m2"])];
 	const r = reconcile(groups, ["m1", "m2", "x"], ["x", "m1", "m2"]);
 	assert.deepEqual(r.groups[0].memberIds, ["m1", "m2"]);
 	assert.deepEqual(r.ungrouped, ["x"]);
-});
-
-test("reconcile: a chip on a tab's right blocks it from joining that group", () => {
-	const groups = [group("G", ["m1", "m2", "m3"])];
-	// x lands inside the m1..m3 run by tab order, but the chip is to x's RIGHT,
-	// so x is to the left of the group's boundary and must NOT be absorbed.
-	const boundaries = { leftChip: new Map(), rightChip: new Map([["x", "G"]]) };
-	const r = reconcile(groups, ["m1", "m2", "m3", "x"], ["m1", "x", "m2", "m3"], boundaries);
-	assert.deepEqual(r.groups[0].memberIds, ["m1", "m2", "m3"]);
-	assert.ok(r.ungrouped.includes("x"));
 });
 
 test("reconcile: dragging a member out of the group removes it", () => {
