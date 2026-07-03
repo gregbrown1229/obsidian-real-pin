@@ -818,7 +818,8 @@ export class TabGroupController {
 			}
 		});
 		this.plugin.registerDomEvent(doc, "dragover", (e) => {
-			if (!this.draggingGroupId) return;
+			const groupId = this.draggingGroupId;
+			if (!groupId) return;
 			const overStrip = (e.target as HTMLElement | null)?.closest?.(
 				".workspace-tab-header-container-inner",
 			);
@@ -828,19 +829,17 @@ export class TabGroupController {
 			}
 			e.preventDefault(); // allow drop
 			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-			this.showDropIndicator(e);
+			this.showDropIndicator(e, groupId);
 		});
 		this.plugin.registerDomEvent(doc, "drop", (e) => {
 			const groupId = this.draggingGroupId;
 			this.draggingGroupId = null;
 			this.hideDropIndicator();
 			if (!groupId) return;
-			const strip = (e.target as HTMLElement | null)?.closest?.(
-				".workspace-tab-header-container-inner",
-			);
-			if (strip) {
+			const plan = this.dropPlan(e, groupId);
+			if (plan) {
 				e.preventDefault();
-				this.moveGroup(groupId, this.dropBeforeLeafId(e));
+				this.moveGroup(groupId, plan.beforeHeader);
 			}
 		});
 		this.plugin.registerDomEvent(doc, "dragend", () => {
@@ -850,22 +849,111 @@ export class TabGroupController {
 	}
 
 	/**
-	 * Draw the insertion marker exactly where the group will land — the same spot
-	 * `dropBeforeLeafId` resolves, so it honors the snap-to-group-boundary rule
-	 * rather than the raw hover position. Positioned with `fixed` coordinates so
-	 * it needs no positioned ancestor. Mutating the DOM here is safe: the drag is
-	 * already in progress (this never runs during dragstart).
+	 * Where the dragged group would land, resolved at the granularity of whole
+	 * *units*: each group counts as one block, each ungrouped tab as one. So the
+	 * insertion point only ever falls *between* groups/ungrouped tabs — never
+	 * between the tabs inside a group — and flips just once, at a unit's midpoint,
+	 * rather than dancing per tab. Returns null when there's nothing to do: over
+	 * the dragged group's own slot, or a boundary touching it (dropping there
+	 * wouldn't move it), so the indicator simply doesn't show. `beforeHeader` is
+	 * the tab the group lands before (null = end of strip).
 	 */
-	private showDropIndicator(e: DragEvent): void {
+	private dropPlan(
+		e: DragEvent,
+		draggingId: string,
+	): {
+		beforeHeader: HTMLElement | null;
+		x: number;
+		top: number;
+		height: number;
+	} | null {
 		const strip = (e.target as HTMLElement | null)?.closest<HTMLElement>(
 			".workspace-tab-header-container-inner",
 		);
-		const anchor = strip ? this.dropAnchor(e, strip) : null;
-		if (!anchor) {
+		if (!strip) return null;
+		const units = this.dropUnits(strip);
+		if (units.length === 0) return null;
+
+		// First unit whose midpoint is right of the cursor → insert before it.
+		let insert = units.length;
+		for (let i = 0; i < units.length; i++) {
+			if (e.clientX < (units[i].left + units[i].right) / 2) {
+				insert = i;
+				break;
+			}
+		}
+
+		// Dropping right before or right after the dragged group leaves it put.
+		const di = units.findIndex((u) => u.groupId === draggingId);
+		if (di >= 0 && (insert === di || insert === di + 1)) return null;
+
+		if (insert >= units.length) {
+			const last = units[units.length - 1];
+			return { beforeHeader: null, x: last.right, top: last.top, height: last.height };
+		}
+		const u = units[insert];
+		return { beforeHeader: u.headers[0], x: u.left, top: u.top, height: u.height };
+	}
+
+	/**
+	 * The tab strip as an ordered list of drop units: consecutive members of one
+	 * group collapse into a single unit (its span starts at the group's chip),
+	 * every ungrouped tab is its own. Membership comes from the reliable
+	 * `data-rp-group` attribute (not leaf enumeration, which drops background
+	 * tabs). Spans are viewport x.
+	 */
+	private dropUnits(strip: HTMLElement): Array<{
+		groupId: string | null;
+		headers: HTMLElement[];
+		left: number;
+		right: number;
+		top: number;
+		height: number;
+	}> {
+		const units: Array<{
+			groupId: string | null;
+			headers: HTMLElement[];
+			left: number;
+			right: number;
+			top: number;
+			height: number;
+		}> = [];
+		strip
+			.querySelectorAll<HTMLElement>(":scope > .workspace-tab-header")
+			.forEach((h) => {
+				const gid = h.dataset.rpGroup ?? null;
+				const r = h.getBoundingClientRect();
+				const cur = units[units.length - 1];
+				if (cur && gid !== null && cur.groupId === gid) {
+					cur.headers.push(h);
+					cur.right = r.right;
+				} else {
+					units.push({
+						groupId: gid,
+						headers: [h],
+						left: r.left,
+						right: r.right,
+						top: r.top,
+						height: r.height,
+					});
+				}
+			});
+		// A group's slot visually starts at its chip, left of its first member.
+		for (const u of units) {
+			if (!u.groupId) continue;
+			const chip = this.chips.get(u.groupId);
+			if (chip) u.left = Math.min(u.left, chip.getBoundingClientRect().left);
+		}
+		return units;
+	}
+
+	private showDropIndicator(e: DragEvent, draggingId: string): void {
+		const plan = this.dropPlan(e, draggingId);
+		if (!plan) {
 			this.hideDropIndicator();
 			return;
 		}
-		const doc = (strip as HTMLElement).ownerDocument;
+		const doc = (e.target as HTMLElement).ownerDocument;
 		let bar = this.dropIndicator;
 		if (!bar || bar.ownerDocument !== doc) {
 			bar?.remove();
@@ -874,41 +962,9 @@ export class TabGroupController {
 			doc.body.appendChild(bar);
 			this.dropIndicator = bar;
 		}
-		bar.style.left = `${Math.round(anchor.x)}px`;
-		bar.style.top = `${Math.round(anchor.top)}px`;
-		bar.style.height = `${Math.round(anchor.height)}px`;
-	}
-
-	/** Viewport x + vertical extent of the insertion line for the current drop. */
-	private dropAnchor(
-		e: DragEvent,
-		strip: HTMLElement,
-	): { x: number; top: number; height: number } | null {
-		const beforeLeafId = this.dropBeforeLeafId(e);
-		if (beforeLeafId !== null) {
-			const leaf = this.leafById(beforeLeafId);
-			const header = leaf ? headerEl(leaf) : undefined;
-			if (header) {
-				// Landing before a group means landing before its chip, which sits
-				// immediately before that group's first-member header.
-				const prev = header.previousElementSibling as HTMLElement | null;
-				const el = prev?.classList.contains("real-pin-group-chip")
-					? prev
-					: header;
-				const r = el.getBoundingClientRect();
-				return { x: r.left, top: r.top, height: r.height };
-			}
-		}
-		// End of the strip: draw at the right edge of the last tab.
-		const headers = strip.querySelectorAll<HTMLElement>(
-			":scope > .workspace-tab-header",
-		);
-		const last = headers[headers.length - 1];
-		if (last) {
-			const r = last.getBoundingClientRect();
-			return { x: r.right, top: r.top, height: r.height };
-		}
-		return null;
+		bar.style.left = `${Math.round(plan.x)}px`;
+		bar.style.top = `${Math.round(plan.top)}px`;
+		bar.style.height = `${Math.round(plan.height)}px`;
 	}
 
 	private hideDropIndicator(): void {
@@ -917,140 +973,18 @@ export class TabGroupController {
 	}
 
 	/**
-	 * The chip or tab header a pill drop should key off. When the cursor is over a
-	 * chip/tab we use it directly; when it's over a gap or the strip's padding we
-	 * snap to the nearest chip/tab by x, so the drop point (and the indicator)
-	 * never jumps to the end of the bar between tabs.
-	 */
-	private resolveDropTarget(e: DragEvent): HTMLElement | null {
-		const direct = (e.target as HTMLElement | null)?.closest<HTMLElement>(
-			".real-pin-group-chip, .workspace-tab-header",
-		);
-		if (direct) return direct;
-		const strip = (e.target as HTMLElement | null)?.closest<HTMLElement>(
-			".workspace-tab-header-container-inner",
-		);
-		if (!strip) return null;
-		let best: HTMLElement | null = null;
-		let bestDist = Infinity;
-		strip
-			.querySelectorAll<HTMLElement>(
-				":scope > .real-pin-group-chip, :scope > .workspace-tab-header",
-			)
-			.forEach((el) => {
-				const r = el.getBoundingClientRect();
-				const dist =
-					e.clientX < r.left
-						? r.left - e.clientX
-						: e.clientX > r.right
-							? e.clientX - r.right
-							: 0;
-				if (dist < bestDist) {
-					bestDist = dist;
-					best = el;
-				}
-			});
-		return best;
-	}
-
-	/** The leaf a pill-drop should land the group *before* (null = end of strip). */
-	private dropBeforeLeafId(e: DragEvent): string | null {
-		const el = this.resolveDropTarget(e);
-		if (!el) return null;
-
-		// Over a group chip: left half → before that whole group (this is how you
-		// land before the first group — its chip is the leftmost element), right
-		// half → after it.
-		if (el.classList.contains("real-pin-group-chip")) {
-			const rect = el.getBoundingClientRect();
-			return this.leftHalf(e, rect)
-				? this.firstMemberOf(el.dataset.rpGroupId)
-				: this.afterGroup(el.dataset.rpGroupId);
-		}
-
-		const header = el;
-		const leaf = this.leafForHeader(header);
-		if (!leaf) return null;
-		const rect = header.getBoundingClientRect();
-		const leftHalf = this.leftHalf(e, rect);
-
-		// Never land inside another group's run — snap to that group's outer
-		// boundary so groups reorder *around* each other instead of splitting or
-		// absorbing one another.
-		const memberGroup = this.groups.find(
-			(g) => g.id !== this.draggingGroupId && g.memberIds.includes(id(leaf)),
-		);
-		if (memberGroup) {
-			return leftHalf
-				? this.firstMemberOf(memberGroup.id)
-				: this.afterGroup(memberGroup.id);
-		}
-
-		if (leftHalf) return id(leaf);
-		// Dropped on the right half — land before the next tab (or at the end).
-		const order = this.orderInParent(leaf);
-		if (!order) return id(leaf);
-		const next = order[order.indexOf(id(leaf)) + 1];
-		return next ?? null;
-	}
-
-	private leftHalf(e: DragEvent, rect: DOMRect): boolean {
-		return e.clientX <= rect.left + rect.width / 2;
-	}
-
-	/** The id of a group's first member in strip order, or null. */
-	private firstMemberOf(groupId: string | undefined): string | null {
-		const order = this.groupOrder(groupId);
-		return order ? order[0] : null;
-	}
-
-	/** The id of the leaf just past a group's last member (null = end of strip). */
-	private afterGroup(groupId: string | undefined): string | null {
-		const order = this.groupOrder(groupId);
-		if (!order) return null;
-		const g = this.groups.find((x) => x.id === groupId);
-		if (!g) return null;
-		const last = order[order.length - 1];
-		const stripOrder = this.orderInParentById(last);
-		if (!stripOrder) return null;
-		return stripOrder[stripOrder.indexOf(last) + 1] ?? null;
-	}
-
-	/** A group's member ids in strip order, or null when it isn't rendered. */
-	private groupOrder(groupId: string | undefined): string[] | null {
-		const g = groupId ? this.groups.find((x) => x.id === groupId) : undefined;
-		if (!g || g.memberIds.length === 0) return null;
-		const anyMember = this.leafById(g.memberIds[0]);
-		const order = anyMember ? this.orderInParent(anyMember) : null;
-		if (!order) return null;
-		const inStrip = order.filter((m) => g.memberIds.includes(m));
-		return inStrip.length > 0 ? inStrip : null;
-	}
-
-	/** Strip order for the container holding `leafId`, or null. */
-	private orderInParentById(leafId: string): string[] | null {
-		const leaf = this.leafById(leafId);
-		return leaf ? this.orderInParent(leaf) : null;
-	}
-
-	private leafForHeader(header: HTMLElement): WorkspaceLeaf | null {
-		let found: WorkspaceLeaf | null = null;
-		this.plugin.app.workspace.iterateAllLeaves((leaf) => {
-			if (headerEl(leaf) === header) found = leaf;
-		});
-		return found;
-	}
-
-	/**
-	 * Move a whole group so its run sits immediately before `beforeLeafId` (null =
+	 * Move a whole group so its run sits immediately before `beforeHeader` (null =
 	 * end of the strip). Operates on the container's `children` model (mutated
 	 * synchronously by removeChild/insertChild) rather than the DOM, which lags —
-	 * so extracting the members then re-inserting them contiguously is exact.
+	 * so extracting the members then re-inserting them contiguously is exact. The
+	 * target index is found by matching header elements against `children`, which
+	 * needs no leaf enumeration.
 	 */
-	private moveGroup(groupId: string, beforeLeafId: string | null): void {
+	private moveGroup(groupId: string, beforeHeader: HTMLElement | null): void {
 		const g = this.groups.find((x) => x.id === groupId);
 		if (!g) return;
-		if (beforeLeafId !== null && g.memberIds.includes(beforeLeafId)) return;
+		// Never key off one of our own members (dropping onto ourselves).
+		if (beforeHeader && beforeHeader.dataset.rpGroup === groupId) return;
 		// Suppress reconcile while the members are mid-move: a member momentarily
 		// separated from its group would otherwise be read as "dragged out" and
 		// ejected. One reconcile runs at the end, when the run is contiguous again.
@@ -1064,8 +998,8 @@ export class TabGroupController {
 			if (!children) continue;
 			const from = children.indexOf(leaf);
 			if (from < 0) continue;
-			let to = beforeLeafId
-				? children.findIndex((l) => id(l) === beforeLeafId)
+			let to = beforeHeader
+				? children.findIndex((l) => headerEl(l) === beforeHeader)
 				: children.length;
 			if (to < 0) to = children.length;
 			const target = from < to ? to - 1 : to;

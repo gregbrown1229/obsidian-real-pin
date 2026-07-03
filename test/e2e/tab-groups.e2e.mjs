@@ -349,13 +349,13 @@ test("dragging a pill shows a drop indicator that clears when the drag ends", as
 		await new Promise(r => setTimeout(r, 150));
 		const strip = a.tabHeaderEl.parentElement;
 		const chip1 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g1.id + '"]');
-		const chip2 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g2.id + '"]');
 		const sel = () => activeDocument.querySelector('.real-pin-group-drop-indicator');
 		const dt = new DataTransfer();
 		chip1.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-		const rect = chip2.getBoundingClientRect();
-		const at = { bubbles: true, dataTransfer: dt, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 };
-		chip2.dispatchEvent(new DragEvent('dragover', at));
+		// Hover g2's LAST tab, right half → land after g2 (a real, non-adjacent move).
+		const rect = d.tabHeaderEl.getBoundingClientRect();
+		const at = { bubbles: true, dataTransfer: dt, clientX: rect.right - 2, clientY: rect.top + rect.height / 2 };
+		d.tabHeaderEl.dispatchEvent(new DragEvent('dragover', at));
 		await new Promise(r => setTimeout(r, 40));
 		const ind = sel();
 		const shown = !!ind;
@@ -374,41 +374,85 @@ test("dragging a pill shows a drop indicator that clears when the drag ends", as
 	assert.equal(r.goneAfter, true, "the indicator is removed when the drag ends");
 });
 
-test("hovering a gap snaps the indicator to the cursor, not the end of the bar", async () => {
+test("no drop indicator appears over the dragged group's own tabs", async () => {
 	const r = await obs.evalInApp(`
 		const app = window.app;
 		const rp = app.plugins.plugins['real-pin'];
 		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
-		for (const p of ['gp-1.md','gp-2.md','gp-3.md','gp-4.md']) await ensure(p);
+		for (const p of ['ow-1.md','ow-2.md','ow-3.md','ow-4.md']) await ensure(p);
 		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
-		const a = await open('gp-1.md'), b = await open('gp-2.md'), c = await open('gp-3.md'), d = await open('gp-4.md');
+		const a = await open('ow-1.md'), b = await open('ow-2.md'), c = await open('ow-3.md'), d = await open('ow-4.md');
 		await new Promise(r => setTimeout(r, 150));
 		const g1 = rp.tabGroups.createGroup([a.id, b.id]);
 		const g2 = rp.tabGroups.createGroup([c.id, d.id]);
 		await new Promise(r => setTimeout(r, 150));
 		const strip = a.tabHeaderEl.parentElement;
 		const chip1 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g1.id + '"]');
-		const chip2 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g2.id + '"]');
 		const dt = new DataTransfer();
-		chip1.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-		// dragover the STRIP itself (not a tab/chip) with the cursor near g2's chip.
-		const cRect = chip2.getBoundingClientRect();
-		const clientX = cRect.left + 2;
-		const stripRect = strip.getBoundingClientRect();
-		strip.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt, clientX, clientY: cRect.top + cRect.height / 2 }));
-		await new Promise(r => setTimeout(r, 40));
-		const ind = activeDocument.querySelector('.real-pin-group-drop-indicator');
-		const x = ind ? parseFloat(ind.style.left) : null;
-		const out = { shown: !!ind, nearCursor: x !== null && Math.abs(x - clientX) < 60, notAtEnd: x !== null && x < stripRect.right - 100 };
+		chip1.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt })); // dragging g1
+		// Hover g1's OWN tabs (both members, both halves) → never an indicator.
+		const results = [];
+		for (const leaf of [a, b]) {
+			const rect = leaf.tabHeaderEl.getBoundingClientRect();
+			for (const cx of [rect.left + 3, rect.right - 3]) {
+				leaf.tabHeaderEl.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt, clientX: cx, clientY: rect.top + rect.height / 2 }));
+				await new Promise(r => setTimeout(r, 20));
+				results.push(!!activeDocument.querySelector('.real-pin-group-drop-indicator'));
+			}
+		}
 		chip1.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+		const out = { anyShown: results.some(Boolean) };
 		rp.tabGroups.ungroup(g1.id); rp.tabGroups.ungroup(g2.id);
 		a.detach(); b.detach(); c.detach(); d.detach();
 		await new Promise(r => setTimeout(r, 100));
 		return out;
 	`);
-	assert.equal(r.shown, true, "the indicator shows even over a gap");
-	assert.equal(r.nearCursor, true, "the indicator snaps to the boundary near the cursor");
-	assert.equal(r.notAtEnd, true, "it does not jump to the end of the bar");
+	assert.equal(r.anyShown, false, "the indicator never appears while hovering the dragged group itself");
+});
+
+test("the indicator snaps to a group's outer edge, never between its tabs", async () => {
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		for (const p of ['ie-1.md','ie-2.md','ie-3.md','ie-4.md','ie-5.md','ie-6.md']) await ensure(p);
+		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
+		const a = await open('ie-1.md'), b = await open('ie-2.md'), x = await open('ie-3.md'), c = await open('ie-4.md'), d = await open('ie-5.md'), e = await open('ie-6.md');
+		await new Promise(r => setTimeout(r, 150));
+		const g1 = rp.tabGroups.createGroup([a.id, b.id]); // dragged; kept non-adjacent to g2 by x
+		const g2 = rp.tabGroups.createGroup([c.id, d.id, e.id]); // 3-tab target
+		await new Promise(r => setTimeout(r, 150));
+		const strip = a.tabHeaderEl.parentElement;
+		const chip1 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g1.id + '"]');
+		const chip2 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g2.id + '"]');
+		const dt = new DataTransfer();
+		chip1.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+		const g2Left = chip2.getBoundingClientRect().left;
+		const interiorLeft = c.tabHeaderEl.getBoundingClientRect().right;   // right of first member
+		const interiorRight = e.tabHeaderEl.getBoundingClientRect().left;   // left of last member
+		const xs = [];
+		for (const leaf of [c, d, e]) { // hover each tab of the target group
+			const rect = leaf.tabHeaderEl.getBoundingClientRect();
+			for (const cx of [rect.left + 4, rect.right - 4]) {
+				leaf.tabHeaderEl.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt, clientX: cx, clientY: rect.top + rect.height / 2 }));
+				await new Promise(r => setTimeout(r, 15));
+				const ind = activeDocument.querySelector('.real-pin-group-drop-indicator');
+				if (ind) xs.push(parseFloat(ind.style.left));
+			}
+		}
+		chip1.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+		// Every observed indicator position must be at the group's edge (<= its left,
+		// or >= its right), never strictly inside the c..e run.
+		const insideAny = xs.some((v) => v > interiorLeft + 4 && v < interiorRight - 4);
+		const out = { count: xs.length, insideAny, distinct: [...new Set(xs.map(Math.round))].length };
+		rp.tabGroups.ungroup(g1.id); rp.tabGroups.ungroup(g2.id);
+		a.detach(); b.detach(); x.detach(); c.detach(); d.detach(); e.detach();
+		await new Promise(r => setTimeout(r, 100));
+		return out;
+	`);
+	assert.ok(r.count >= 4, "sampled several positions across the group's tabs");
+	assert.equal(r.insideAny, false, "the indicator is never placed between the group's tabs");
+	assert.ok(r.distinct <= 2, "across the whole group the indicator has at most two spots (before/after) — no per-tab dance");
 });
 
 test("dragging a single-tab group onto another does not merge it in", async () => {
