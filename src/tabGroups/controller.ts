@@ -41,6 +41,16 @@ type TabsInternal = WorkspaceParent & {
 	children?: WorkspaceLeaf[];
 };
 
+/**
+ * `getLeafById` is Obsidian's own id→leaf lookup. It's the reliable way to ask
+ * "is this tab still open?" — unlike `iterateAllLeaves`, it resolves deferred
+ * (background) tabs and returns null exactly when a leaf has been closed. Not on
+ * the public type surface, so reached through a guarded narrow cast.
+ */
+type WorkspaceWithLeafById = {
+	getLeafById?(id: string): WorkspaceLeaf | null;
+};
+
 const id = (leaf: WorkspaceLeaf): string => (leaf as LeafInternal).id;
 const headerEl = (leaf: WorkspaceLeaf): HTMLElement | undefined =>
 	(leaf as LeafInternal).tabHeaderEl;
@@ -78,6 +88,13 @@ export class TabGroupController {
 	private readonly delegatedDocs = new WeakSet<Document>();
 	/** The group being dragged by its pill (HTML5 drag), or null. */
 	private draggingGroupId: string | null = null;
+	/**
+	 * While a group pill is being dragged, every group is collapsed so you
+	 * reorder whole groups without minding how many tabs each holds. This maps
+	 * each group's pre-drag collapsed state so it can be restored on drop/cancel;
+	 * null when no pill drag is in flight.
+	 */
+	private groupDragRestore: Map<string, boolean> | null = null;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -96,7 +113,12 @@ export class TabGroupController {
 
 		const ws = this.plugin.app.workspace;
 		this.plugin.registerEvent(ws.on("layout-change", () => this.schedule()));
-		this.plugin.registerEvent(ws.on("active-leaf-change", () => this.schedule()));
+		this.plugin.registerEvent(
+			ws.on("active-leaf-change", (leaf) => {
+				this.expandGroupOf(leaf);
+				this.schedule();
+			}),
+		);
 		this.plugin.registerEvent(ws.on("window-open", () => this.schedule()));
 		this.plugin.registerEvent(
 			ws.on("file-menu", (menu, _file, source, leaf) => {
@@ -170,6 +192,19 @@ export class TabGroupController {
 		if (!leaf) return;
 		const g = this.groups.find((x) => x.memberIds.includes(id(leaf)));
 		if (g) this.toggleCollapse(g.id);
+	}
+
+	/**
+	 * Expand the group the newly-focused leaf belongs to (Chrome auto-expands a
+	 * collapsed group when one of its tabs becomes active). Only flips the flag;
+	 * the scheduled reconcile repaints. No-op mid pill-drag, where we deliberately
+	 * keep everything collapsed.
+	 */
+	private expandGroupOf(leaf: WorkspaceLeaf | null): void {
+		if (!this.plugin.settings.enableTabGroups || this.groupDragRestore) return;
+		if (!leaf) return;
+		const g = this.groups.find((x) => x.memberIds.includes(id(leaf)));
+		if (g && g.collapsed) g.collapsed = false;
 	}
 
 	ungroup(groupId: string): void {
@@ -539,11 +574,28 @@ export class TabGroupController {
 	}
 
 	/**
+	 * Drop groups whose tabs have all been closed — a group with no live member
+	 * ceases to exist. Uses `getLeafById` (reliable for deferred/background tabs)
+	 * rather than `iterateAllLeaves`, which under-reports and would delete live
+	 * groups. Only mutates `this.groups`; the caller (reconcile) renders the rest.
+	 */
+	private pruneClosedGroups(): void {
+		const ws = this.plugin.app.workspace as unknown as WorkspaceWithLeafById;
+		if (typeof ws.getLeafById !== "function") return; // can't verify → keep all
+		const isOpen = (leafId: string): boolean => ws.getLeafById!(leafId) != null;
+		const next = this.groups.filter((g) => g.memberIds.some(isOpen));
+		if (next.length !== this.groups.length) this.groups = next;
+	}
+
+	/**
 	 * Persist live groups (debounced) so they survive a reload, and keep any
 	 * linked saved groups in sync (Chrome's "living" saved group). Gated on a
 	 * signature so unchanged reconciles (e.g. active-leaf-change) don't write.
 	 */
 	private schedulePersist(): void {
+		// Don't persist the transient all-collapsed state a pill drag installs;
+		// the real state is written when the drag restores it.
+		if (this.groupDragRestore) return;
 		if (this.saveTimer !== null) return;
 		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = null;
@@ -606,6 +658,8 @@ export class TabGroupController {
 		this.setBodyClass(true);
 		// Mutate with observers off so our own writes never re-trigger us.
 		this.disconnectObservers();
+		// Drop groups emptied by closed tabs first, so their chips aren't rendered.
+		this.pruneClosedGroups();
 
 		const byContainer = new Map<WorkspaceParent, WorkspaceLeaf[]>();
 		this.plugin.app.workspace.iterateAllLeaves((leaf) => {
@@ -768,6 +822,7 @@ export class TabGroupController {
 				e.dataTransfer.effectAllowed = "move";
 				e.dataTransfer.setData("text/plain", groupId);
 			}
+			this.collapseAllForDrag();
 		});
 		this.plugin.registerDomEvent(doc, "dragover", (e) => {
 			if (!this.draggingGroupId) return;
@@ -785,31 +840,88 @@ export class TabGroupController {
 			const strip = (e.target as HTMLElement | null)?.closest?.(
 				".workspace-tab-header-container-inner",
 			);
-			if (!strip) return;
-			e.preventDefault();
-			this.moveGroup(groupId, this.dropBeforeLeafId(e));
+			if (strip) {
+				e.preventDefault();
+				this.moveGroup(groupId, this.dropBeforeLeafId(e));
+			}
+			// A drop ends the drag — restore the pre-drag collapsed states even if
+			// the drop missed the strip (dragend also restores; it's idempotent).
+			this.restoreAfterGroupDrag();
 		});
 		this.plugin.registerDomEvent(doc, "dragend", () => {
 			this.draggingGroupId = null;
+			this.restoreAfterGroupDrag();
 		});
+	}
+
+	/** Collapse every group for the duration of a pill drag, remembering states. */
+	private collapseAllForDrag(): void {
+		this.groupDragRestore = new Map(
+			this.groups.map((g) => [g.id, g.collapsed] as const),
+		);
+		let changed = false;
+		for (const g of this.groups) {
+			if (!g.collapsed) {
+				g.collapsed = true;
+				changed = true;
+			}
+		}
+		if (changed) this.reconcile();
+	}
+
+	/** Restore each group's pre-drag collapsed state after a pill drag ends. */
+	private restoreAfterGroupDrag(): void {
+		const restore = this.groupDragRestore;
+		if (!restore) return;
+		this.groupDragRestore = null;
+		let changed = false;
+		for (const g of this.groups) {
+			const was = restore.get(g.id);
+			if (was !== undefined && g.collapsed !== was) {
+				g.collapsed = was;
+				changed = true;
+			}
+		}
+		if (changed) this.reconcile();
+		else this.schedulePersist();
 	}
 
 	/** The leaf a pill-drop should land the group *before* (null = end of strip). */
 	private dropBeforeLeafId(e: DragEvent): string | null {
 		const target = e.target as HTMLElement | null;
 
-		// Dropped on another group's chip → land immediately before that whole
-		// group. This is what lets you drop *before* the first group: its chip is
-		// the leftmost element, so aiming at the far left lands on the chip.
+		// Dropped on a group chip: left half → before that whole group (this is how
+		// you land before the first group — its chip is the leftmost element), right
+		// half → after it.
 		const chip = target?.closest<HTMLElement>(".real-pin-group-chip");
-		if (chip) return this.firstMemberOf(chip.dataset.rpGroupId);
+		if (chip) {
+			const gid = chip.dataset.rpGroupId;
+			const rect = chip.getBoundingClientRect();
+			return this.leftHalf(e, rect)
+				? this.firstMemberOf(gid)
+				: this.afterGroup(gid);
+		}
 
 		const header = target?.closest<HTMLElement>(".workspace-tab-header");
 		if (!header) return null;
 		const leaf = this.leafForHeader(header);
 		if (!leaf) return null;
 		const rect = header.getBoundingClientRect();
-		if (e.clientX <= rect.left + rect.width / 2) return id(leaf);
+		const leftHalf = this.leftHalf(e, rect);
+
+		// Never land inside another group's run — snap to that group's outer
+		// boundary so groups reorder *around* each other instead of splitting or
+		// absorbing one another.
+		const memberGroup = this.groups.find(
+			(g) => g.id !== this.draggingGroupId && g.memberIds.includes(id(leaf)),
+		);
+		if (memberGroup) {
+			return leftHalf
+				? this.firstMemberOf(memberGroup.id)
+				: this.afterGroup(memberGroup.id);
+		}
+
+		if (leftHalf) return id(leaf);
 		// Dropped on the right half — land before the next tab (or at the end).
 		const order = this.orderInParent(leaf);
 		if (!order) return id(leaf);
@@ -817,14 +929,43 @@ export class TabGroupController {
 		return next ?? null;
 	}
 
+	private leftHalf(e: DragEvent, rect: DOMRect): boolean {
+		return e.clientX <= rect.left + rect.width / 2;
+	}
+
 	/** The id of a group's first member in strip order, or null. */
 	private firstMemberOf(groupId: string | undefined): string | null {
+		const order = this.groupOrder(groupId);
+		return order ? order[0] : null;
+	}
+
+	/** The id of the leaf just past a group's last member (null = end of strip). */
+	private afterGroup(groupId: string | undefined): string | null {
+		const order = this.groupOrder(groupId);
+		if (!order) return null;
+		const g = this.groups.find((x) => x.id === groupId);
+		if (!g) return null;
+		const last = order[order.length - 1];
+		const stripOrder = this.orderInParentById(last);
+		if (!stripOrder) return null;
+		return stripOrder[stripOrder.indexOf(last) + 1] ?? null;
+	}
+
+	/** A group's member ids in strip order, or null when it isn't rendered. */
+	private groupOrder(groupId: string | undefined): string[] | null {
 		const g = groupId ? this.groups.find((x) => x.id === groupId) : undefined;
 		if (!g || g.memberIds.length === 0) return null;
 		const anyMember = this.leafById(g.memberIds[0]);
 		const order = anyMember ? this.orderInParent(anyMember) : null;
 		if (!order) return null;
-		return order.find((m) => g.memberIds.includes(m)) ?? null;
+		const inStrip = order.filter((m) => g.memberIds.includes(m));
+		return inStrip.length > 0 ? inStrip : null;
+	}
+
+	/** Strip order for the container holding `leafId`, or null. */
+	private orderInParentById(leafId: string): string[] | null {
+		const leaf = this.leafById(leafId);
+		return leaf ? this.orderInParent(leaf) : null;
 	}
 
 	private leafForHeader(header: HTMLElement): WorkspaceLeaf | null {

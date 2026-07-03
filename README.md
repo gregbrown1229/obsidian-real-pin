@@ -33,8 +33,9 @@ Opt-in: turn on **Settings → Real Pin → Enable tab groups** (off by default)
 
 - **Make a group** — **right-click a tab → Add tab to new group** or **Add tab to existing group…** (also **Remove tab from group**). Or use the commands **New tab group from active tab** / **Add active tab to group**. A colored chip appears in the tab bar before the group's tabs, which share a colored band.
 - **Drag to group** — Obsidian already lets you drag a tab along the bar; drop it *inside* a group's run to add it, or drag a member *out* to remove it. (We read the native reorder and update membership — no custom drag layer.)
-- **Reorder groups** — drag a group's chip to move the whole group along the bar as one block. Drop it on another group's chip to land just before that group — that's how you move a group to the very start of the bar.
-- **Collapse / expand** — click the group chip (collapsed shows just the chip; the member tabs hide).
+- **Reorder groups** — drag a group's chip to move the whole group along the bar as one block. While you drag, every group folds to just its chip so you rearrange groups without minding how many tabs each holds; groups always reorder *around* each other and never split or merge. Drop on the left half of another group's chip to land before it (that's how you reach the very start of the bar) or the right half to land after it.
+- **Collapse / expand** — click the group chip (collapsed shows just the chip; the member tabs hide). Focusing any tab in a collapsed group expands it again.
+- **Self-tidying** — closing a group's last tab removes the group.
 - **Rename / recolor** — right-click the chip → **Edit name and color…** (nine Chrome colors).
 - **Save & reopen** — right-click the chip → **Save group** (or the command). Saved groups live in the **Saved tab groups** sidebar panel (ribbon icon, or the **Open the saved tab groups panel** command); **Open** reopens every tab back into the current tab area, regrouped with the original name and color. A saved group stays in sync with its open group, like Chrome's saved groups.
 - **Persists** — live groups are restored when you reopen the vault; saved groups persist until you delete them. Works in popped-out windows too. Turning the feature off (or disabling Real Pin) removes every chip and reverts every tab.
