@@ -38,6 +38,17 @@ type LeafInternal = WorkspaceLeaf & {
 type TabsInternal = WorkspaceParent & {
 	removeChild?(leaf: WorkspaceLeaf): void;
 	insertChild?(index: number, leaf: WorkspaceLeaf): void;
+	children?: WorkspaceLeaf[];
+};
+
+/**
+ * `getLeafById` is Obsidian's own id→leaf lookup. It's the reliable way to ask
+ * "is this tab still open?" — unlike `iterateAllLeaves`, it resolves deferred
+ * (background) tabs and returns null exactly when a leaf has been closed. Not on
+ * the public type surface, so reached through a guarded narrow cast.
+ */
+type WorkspaceWithLeafById = {
+	getLeafById?(id: string): WorkspaceLeaf | null;
 };
 
 const id = (leaf: WorkspaceLeaf): string => (leaf as LeafInternal).id;
@@ -75,6 +86,10 @@ export class TabGroupController {
 	private lastSig = "";
 	/** Documents we've already wired the delegated chip click listener onto. */
 	private readonly delegatedDocs = new WeakSet<Document>();
+	/** The group being dragged by its pill (HTML5 drag), or null. */
+	private draggingGroupId: string | null = null;
+	/** Insertion marker shown while dragging a pill (where the group will land). */
+	private dropIndicator: HTMLElement | null = null;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -93,7 +108,12 @@ export class TabGroupController {
 
 		const ws = this.plugin.app.workspace;
 		this.plugin.registerEvent(ws.on("layout-change", () => this.schedule()));
-		this.plugin.registerEvent(ws.on("active-leaf-change", () => this.schedule()));
+		this.plugin.registerEvent(
+			ws.on("active-leaf-change", (leaf) => {
+				this.expandGroupOf(leaf);
+				this.schedule();
+			}),
+		);
 		this.plugin.registerEvent(ws.on("window-open", () => this.schedule()));
 		this.plugin.registerEvent(
 			ws.on("file-menu", (menu, _file, source, leaf) => {
@@ -169,6 +189,18 @@ export class TabGroupController {
 		if (g) this.toggleCollapse(g.id);
 	}
 
+	/**
+	 * Expand the group the newly-focused leaf belongs to (Chrome auto-expands a
+	 * collapsed group when one of its tabs becomes active). Only flips the flag;
+	 * the scheduled reconcile repaints.
+	 */
+	private expandGroupOf(leaf: WorkspaceLeaf | null): void {
+		if (!this.plugin.settings.enableTabGroups) return;
+		if (!leaf) return;
+		const g = this.groups.find((x) => x.memberIds.includes(id(leaf)));
+		if (g && g.collapsed) g.collapsed = false;
+	}
+
 	ungroup(groupId: string): void {
 		this.groups = this.groups.filter((g) => g.id !== groupId);
 		this.reconcile();
@@ -216,7 +248,10 @@ export class TabGroupController {
 		else new Notice("The active tab isn't in a group.");
 	}
 
-	/** Move a leaf into a group (removing it from any other). */
+	/**
+	 * Move a leaf into a group (removing it from any other) and snap it next to
+	 * the group's run so the group stays a contiguous block.
+	 */
 	addLeafToGroup(leafId: string, groupId: string): void {
 		const g = this.groups.find((x) => x.id === groupId);
 		if (!g) return;
@@ -227,20 +262,50 @@ export class TabGroupController {
 		}
 		if (!g.memberIds.includes(leafId)) g.memberIds.push(leafId);
 		this.groups = this.groups.filter((x) => x.memberIds.length > 0);
+
+		const leaf = this.leafById(leafId);
+		const order = leaf ? this.orderInParent(leaf) : null;
+		if (leaf && order) {
+			const otherPos = g.memberIds
+				.filter((m) => m !== leafId)
+				.map((m) => order.indexOf(m))
+				.filter((i) => i >= 0);
+			if (otherPos.length > 0) {
+				this.moveLeafAfter(leaf, order[Math.max(...otherPos)]);
+			}
+		}
 		this.reconcile();
 	}
 
-	/** Remove a leaf from whatever group it's in (dropping emptied groups). */
+	/**
+	 * Remove a leaf from whatever group it's in (dropping emptied groups). If the
+	 * tab was in the middle of the group's run, eject it just past the group so
+	 * the group stays contiguous and never visually contains a non-member.
+	 */
 	removeLeafFromGroup(leafId: string): void {
-		let changed = false;
-		for (const g of this.groups) {
-			if (g.memberIds.includes(leafId)) {
-				g.memberIds = g.memberIds.filter((m) => m !== leafId);
-				changed = true;
+		const g = this.groups.find((x) => x.memberIds.includes(leafId));
+		if (!g) return;
+		g.memberIds = g.memberIds.filter((m) => m !== leafId);
+		this.groups = this.groups.filter((x) => x.memberIds.length > 0);
+
+		if (g.memberIds.length > 0) {
+			const leaf = this.leafById(leafId);
+			const order = leaf ? this.orderInParent(leaf) : null;
+			if (leaf && order) {
+				const removedPos = order.indexOf(leafId);
+				const memberPos = g.memberIds
+					.map((m) => order.indexOf(m))
+					.filter((i) => i >= 0);
+				const min = Math.min(...memberPos);
+				const max = Math.max(...memberPos);
+				// Only move when it's stranded *between* members; an edge tab is
+				// already outside the run.
+				if (memberPos.length > 0 && removedPos > min && removedPos < max) {
+					this.moveLeafAfter(leaf, order[max]);
+				}
 			}
 		}
-		this.groups = this.groups.filter((g) => g.memberIds.length > 0);
-		if (changed) this.reconcile();
+		this.reconcile();
 	}
 
 	/** Add our grouping items to a tab's native right-click menu. */
@@ -461,6 +526,28 @@ export class TabGroupController {
 		return found;
 	}
 
+	/** Leaf-id order (DOM order) of the strip that `leaf` lives in, or null. */
+	private orderInParent(leaf: WorkspaceLeaf): string[] | null {
+		const strip = headerEl(leaf)?.parentElement;
+		if (!strip) return null;
+		const parent = leaf.parent;
+		const leaves: WorkspaceLeaf[] = [];
+		this.plugin.app.workspace.iterateAllLeaves((l) => {
+			if (l.parent === parent) leaves.push(l);
+		});
+		return readOrder(strip, leaves).order;
+	}
+
+	/** Move `leaf` to sit immediately after `afterLeafId` within its strip. */
+	private moveLeafAfter(leaf: WorkspaceLeaf, afterLeafId: string): void {
+		const order = this.orderInParent(leaf);
+		if (!order) return;
+		const from = order.indexOf(id(leaf));
+		const to = order.indexOf(afterLeafId);
+		if (from < 0 || to < 0 || from === to + 1) return; // already right after
+		moveLeafToIndex(leaf, from < to ? to : to + 1);
+	}
+
 	private refreshSavedView(): void {
 		this.plugin.app.workspace
 			.getLeavesOfType(VIEW_TYPE_SAVED_GROUPS)
@@ -478,6 +565,20 @@ export class TabGroupController {
 			this.scheduled = null;
 			this.reconcile();
 		}, 30);
+	}
+
+	/**
+	 * Drop groups whose tabs have all been closed — a group with no live member
+	 * ceases to exist. Uses `getLeafById` (reliable for deferred/background tabs)
+	 * rather than `iterateAllLeaves`, which under-reports and would delete live
+	 * groups. Only mutates `this.groups`; the caller (reconcile) renders the rest.
+	 */
+	private pruneClosedGroups(): void {
+		const ws = this.plugin.app.workspace as unknown as WorkspaceWithLeafById;
+		if (typeof ws.getLeafById !== "function") return; // can't verify → keep all
+		const isOpen = (leafId: string): boolean => ws.getLeafById!(leafId) != null;
+		const next = this.groups.filter((g) => g.memberIds.some(isOpen));
+		if (next.length !== this.groups.length) this.groups = next;
 	}
 
 	/**
@@ -548,6 +649,8 @@ export class TabGroupController {
 		this.setBodyClass(true);
 		// Mutate with observers off so our own writes never re-trigger us.
 		this.disconnectObservers();
+		// Drop groups emptied by closed tabs first, so their chips aren't rendered.
+		this.pruneClosedGroups();
 
 		const byContainer = new Map<WorkspaceParent, WorkspaceLeaf[]>();
 		this.plugin.app.workspace.iterateAllLeaves((leaf) => {
@@ -700,6 +803,209 @@ export class TabGroupController {
 			e.preventDefault();
 			this.toggleCollapse(groupId);
 		});
+
+		// Drag the pill to reorder the whole group (HTML5 drag). We touch nothing
+		// in dragstart — mutating the DOM there aborts Chromium's native drag. The
+		// chip itself is the drag ghost; a drop indicator (positioned in dragover)
+		// shows where the group will land.
+		this.plugin.registerDomEvent(doc, "dragstart", (e) => {
+			const groupId = groupIdOf(e);
+			if (!groupId) return;
+			this.draggingGroupId = groupId;
+			if (e.dataTransfer) {
+				e.dataTransfer.effectAllowed = "move";
+				e.dataTransfer.setData("text/plain", groupId);
+			}
+		});
+		this.plugin.registerDomEvent(doc, "dragover", (e) => {
+			const groupId = this.draggingGroupId;
+			if (!groupId) return;
+			const overStrip = (e.target as HTMLElement | null)?.closest?.(
+				".workspace-tab-header-container-inner",
+			);
+			if (!overStrip) {
+				this.hideDropIndicator();
+				return;
+			}
+			e.preventDefault(); // allow drop
+			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+			this.showDropIndicator(e, groupId);
+		});
+		this.plugin.registerDomEvent(doc, "drop", (e) => {
+			const groupId = this.draggingGroupId;
+			this.draggingGroupId = null;
+			this.hideDropIndicator();
+			if (!groupId) return;
+			const plan = this.dropPlan(e, groupId);
+			if (plan) {
+				e.preventDefault();
+				this.moveGroup(groupId, plan.beforeHeader);
+			}
+		});
+		this.plugin.registerDomEvent(doc, "dragend", () => {
+			this.draggingGroupId = null;
+			this.hideDropIndicator();
+		});
+	}
+
+	/**
+	 * Where the dragged group would land, resolved at the granularity of whole
+	 * *units*: each group counts as one block, each ungrouped tab as one. So the
+	 * insertion point only ever falls *between* groups/ungrouped tabs — never
+	 * between the tabs inside a group — and flips just once, at a unit's midpoint,
+	 * rather than dancing per tab. Returns null when there's nothing to do: over
+	 * the dragged group's own slot, or a boundary touching it (dropping there
+	 * wouldn't move it), so the indicator simply doesn't show. `beforeHeader` is
+	 * the tab the group lands before (null = end of strip).
+	 */
+	private dropPlan(
+		e: DragEvent,
+		draggingId: string,
+	): {
+		beforeHeader: HTMLElement | null;
+		x: number;
+		top: number;
+		height: number;
+	} | null {
+		const strip = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+			".workspace-tab-header-container-inner",
+		);
+		if (!strip) return null;
+		const units = this.dropUnits(strip);
+		if (units.length === 0) return null;
+
+		// First unit whose midpoint is right of the cursor → insert before it.
+		let insert = units.length;
+		for (let i = 0; i < units.length; i++) {
+			if (e.clientX < (units[i].left + units[i].right) / 2) {
+				insert = i;
+				break;
+			}
+		}
+
+		// Dropping right before or right after the dragged group leaves it put.
+		const di = units.findIndex((u) => u.groupId === draggingId);
+		if (di >= 0 && (insert === di || insert === di + 1)) return null;
+
+		if (insert >= units.length) {
+			const last = units[units.length - 1];
+			return { beforeHeader: null, x: last.right, top: last.top, height: last.height };
+		}
+		const u = units[insert];
+		return { beforeHeader: u.headers[0], x: u.left, top: u.top, height: u.height };
+	}
+
+	/**
+	 * The tab strip as an ordered list of drop units: consecutive members of one
+	 * group collapse into a single unit (its span starts at the group's chip),
+	 * every ungrouped tab is its own. Membership comes from the reliable
+	 * `data-rp-group` attribute (not leaf enumeration, which drops background
+	 * tabs). Spans are viewport x.
+	 */
+	private dropUnits(strip: HTMLElement): Array<{
+		groupId: string | null;
+		headers: HTMLElement[];
+		left: number;
+		right: number;
+		top: number;
+		height: number;
+	}> {
+		const units: Array<{
+			groupId: string | null;
+			headers: HTMLElement[];
+			left: number;
+			right: number;
+			top: number;
+			height: number;
+		}> = [];
+		strip
+			.querySelectorAll<HTMLElement>(":scope > .workspace-tab-header")
+			.forEach((h) => {
+				const gid = h.dataset.rpGroup ?? null;
+				const r = h.getBoundingClientRect();
+				const cur = units[units.length - 1];
+				if (cur && gid !== null && cur.groupId === gid) {
+					cur.headers.push(h);
+					cur.right = r.right;
+				} else {
+					units.push({
+						groupId: gid,
+						headers: [h],
+						left: r.left,
+						right: r.right,
+						top: r.top,
+						height: r.height,
+					});
+				}
+			});
+		// A group's slot visually starts at its chip, left of its first member.
+		for (const u of units) {
+			if (!u.groupId) continue;
+			const chip = this.chips.get(u.groupId);
+			if (chip) u.left = Math.min(u.left, chip.getBoundingClientRect().left);
+		}
+		return units;
+	}
+
+	private showDropIndicator(e: DragEvent, draggingId: string): void {
+		const plan = this.dropPlan(e, draggingId);
+		if (!plan) {
+			this.hideDropIndicator();
+			return;
+		}
+		const doc = (e.target as HTMLElement).ownerDocument;
+		let bar = this.dropIndicator;
+		if (!bar || bar.ownerDocument !== doc) {
+			bar?.remove();
+			bar = doc.createElement("div");
+			bar.className = "real-pin-group-drop-indicator";
+			doc.body.appendChild(bar);
+			this.dropIndicator = bar;
+		}
+		bar.style.left = `${Math.round(plan.x)}px`;
+		bar.style.top = `${Math.round(plan.top)}px`;
+		bar.style.height = `${Math.round(plan.height)}px`;
+	}
+
+	private hideDropIndicator(): void {
+		this.dropIndicator?.remove();
+		this.dropIndicator = null;
+	}
+
+	/**
+	 * Move a whole group so its run sits immediately before `beforeHeader` (null =
+	 * end of the strip). Operates on the container's `children` model (mutated
+	 * synchronously by removeChild/insertChild) rather than the DOM, which lags —
+	 * so extracting the members then re-inserting them contiguously is exact. The
+	 * target index is found by matching header elements against `children`, which
+	 * needs no leaf enumeration.
+	 */
+	private moveGroup(groupId: string, beforeHeader: HTMLElement | null): void {
+		const g = this.groups.find((x) => x.id === groupId);
+		if (!g) return;
+		// Never key off one of our own members (dropping onto ourselves).
+		if (beforeHeader && beforeHeader.dataset.rpGroup === groupId) return;
+		// Suppress reconcile while the members are mid-move: a member momentarily
+		// separated from its group would otherwise be read as "dragged out" and
+		// ejected. One reconcile runs at the end, when the run is contiguous again.
+		this.cancelScheduled();
+		this.disconnectObservers();
+		for (const memberId of g.memberIds.slice()) {
+			const leaf = this.leafById(memberId);
+			if (!leaf) continue;
+			const parent = leaf.parent as TabsInternal;
+			const children = parent.children;
+			if (!children) continue;
+			const from = children.indexOf(leaf);
+			if (from < 0) continue;
+			let to = beforeHeader
+				? children.findIndex((l) => headerEl(l) === beforeHeader)
+				: children.length;
+			if (to < 0) to = children.length;
+			const target = from < to ? to - 1 : to;
+			if (from !== target) moveLeafToIndex(leaf, target);
+		}
+		this.reconcile();
 	}
 
 	private showChipMenu(groupId: string, evt: MouseEvent): void {
@@ -738,6 +1044,8 @@ export class TabGroupController {
 	clear(): void {
 		this.cancelScheduled();
 		this.disconnectObservers();
+		this.draggingGroupId = null;
+		this.hideDropIndicator();
 		for (const header of this.tagged) clearHeaderAttrs(header);
 		this.tagged = new Set();
 		for (const chip of this.chips.values()) chip.remove();

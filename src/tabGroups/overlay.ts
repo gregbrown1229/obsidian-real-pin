@@ -51,6 +51,9 @@ export function buildChip(doc: Document): HTMLElement {
 	chip.className = CHIP_CLASS;
 	chip.setAttribute("role", "button");
 	chip.tabIndex = 0;
+	// Draggable so the whole group can be reordered by dragging its pill. A plain
+	// click (no drag) still collapses; the browser distinguishes the two.
+	chip.draggable = true;
 
 	const dot = doc.createElement("span");
 	dot.className = CHIP_DOT_CLASS;

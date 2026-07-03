@@ -91,6 +91,15 @@ test("reconcile: dragging an ungrouped tab inside a group joins it", () => {
 	assert.deepEqual(r.ungrouped, []);
 });
 
+test("reconcile: dropping a tab at a group's edge does not absorb it", () => {
+	// Predictable rule: a tab joins only when dropped *between* a group's tabs.
+	// Landing at the group's outer edge leaves it ungrouped.
+	const groups = [group("G", ["m1", "m2"])];
+	const r = reconcile(groups, ["m1", "m2", "x"], ["x", "m1", "m2"]);
+	assert.deepEqual(r.groups[0].memberIds, ["m1", "m2"]);
+	assert.deepEqual(r.ungrouped, ["x"]);
+});
+
 test("reconcile: dragging a member out of the group removes it", () => {
 	const groups = [group("G", ["a", "b", "c"])];
 	// move b to the end, next to ungrouped x → both neighbors ungrouped
