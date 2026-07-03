@@ -88,6 +88,16 @@ export class TabGroupController {
 	private readonly delegatedDocs = new WeakSet<Document>();
 	/** The group being dragged by its pill (HTML5 drag), or null. */
 	private draggingGroupId: string | null = null;
+	/**
+	 * Each group's collapsed state captured when a pill drag folds them all, so
+	 * they can be restored on drop/cancel; null when no pill drag is folding them.
+	 */
+	private groupDragRestore: Map<string, boolean> | null = null;
+	/**
+	 * Pending rAF that folds the groups one frame after a pill drag starts, with
+	 * the window it was scheduled on (a popout has its own — cancel must match).
+	 */
+	private collapseRaf: { view: Window; id: number } | null = null;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -190,10 +200,11 @@ export class TabGroupController {
 	/**
 	 * Expand the group the newly-focused leaf belongs to (Chrome auto-expands a
 	 * collapsed group when one of its tabs becomes active). Only flips the flag;
-	 * the scheduled reconcile repaints.
+	 * the scheduled reconcile repaints. No-op mid pill-drag, where we keep
+	 * everything folded on purpose.
 	 */
 	private expandGroupOf(leaf: WorkspaceLeaf | null): void {
-		if (!this.plugin.settings.enableTabGroups) return;
+		if (!this.plugin.settings.enableTabGroups || this.groupDragRestore) return;
 		if (!leaf) return;
 		const g = this.groups.find((x) => x.memberIds.includes(id(leaf)));
 		if (g && g.collapsed) g.collapsed = false;
@@ -585,6 +596,9 @@ export class TabGroupController {
 	 * signature so unchanged reconciles (e.g. active-leaf-change) don't write.
 	 */
 	private schedulePersist(): void {
+		// Don't persist the transient all-collapsed state a pill drag installs;
+		// the real state is written when the drag restores it.
+		if (this.groupDragRestore) return;
 		if (this.saveTimer !== null) return;
 		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = null;
@@ -811,6 +825,18 @@ export class TabGroupController {
 				e.dataTransfer.effectAllowed = "move";
 				e.dataTransfer.setData("text/plain", groupId);
 			}
+			// Fold every group to just its chip so you rearrange them without
+			// minding how many tabs each holds. This MUST be deferred: mutating the
+			// DOM inside dragstart makes Chromium/Electron abort the native drag
+			// (bug 168544). A frame later the drag is established and safe to touch.
+			const view = doc.defaultView;
+			if (view) {
+				const id = view.requestAnimationFrame(() => {
+					this.collapseRaf = null;
+					if (this.draggingGroupId === groupId) this.collapseAllForDrag();
+				});
+				this.collapseRaf = { view, id };
+			}
 		});
 		this.plugin.registerDomEvent(doc, "dragover", (e) => {
 			if (!this.draggingGroupId) return;
@@ -832,10 +858,50 @@ export class TabGroupController {
 				e.preventDefault();
 				this.moveGroup(groupId, this.dropBeforeLeafId(e));
 			}
+			this.restoreAfterGroupDrag();
 		});
 		this.plugin.registerDomEvent(doc, "dragend", () => {
 			this.draggingGroupId = null;
+			this.restoreAfterGroupDrag();
 		});
+	}
+
+	/**
+	 * Fold every group to just its chip for the duration of a pill drag,
+	 * remembering each group's prior state. Only ever called from a deferred
+	 * (post-dragstart) callback so it can't abort the native drag.
+	 */
+	private collapseAllForDrag(): void {
+		if (!this.plugin.settings.enableTabGroups) return;
+		this.groupDragRestore = new Map(
+			this.groups.map((g) => [g.id, g.collapsed] as const),
+		);
+		let changed = false;
+		for (const g of this.groups) {
+			if (!g.collapsed) {
+				g.collapsed = true;
+				changed = true;
+			}
+		}
+		if (changed) this.reconcile();
+	}
+
+	/** Restore each group's pre-drag collapsed state after a pill drag ends. */
+	private restoreAfterGroupDrag(): void {
+		this.cancelCollapseRaf();
+		const restore = this.groupDragRestore;
+		if (!restore) return;
+		this.groupDragRestore = null;
+		let changed = false;
+		for (const g of this.groups) {
+			const was = restore.get(g.id);
+			if (was !== undefined && g.collapsed !== was) {
+				g.collapsed = was;
+				changed = true;
+			}
+		}
+		if (changed) this.reconcile();
+		else this.schedulePersist();
 	}
 
 	/** The leaf a pill-drop should land the group *before* (null = end of strip). */
@@ -997,6 +1063,8 @@ export class TabGroupController {
 	clear(): void {
 		this.cancelScheduled();
 		this.disconnectObservers();
+		this.draggingGroupId = null;
+		this.groupDragRestore = null;
 		for (const header of this.tagged) clearHeaderAttrs(header);
 		this.tagged = new Set();
 		for (const chip of this.chips.values()) chip.remove();
@@ -1056,6 +1124,15 @@ export class TabGroupController {
 		if (this.saveTimer !== null) {
 			window.clearTimeout(this.saveTimer);
 			this.saveTimer = null;
+		}
+		this.cancelCollapseRaf();
+	}
+
+	/** Cancel a pending fold-on-drag frame callback on its own window. */
+	private cancelCollapseRaf(): void {
+		if (this.collapseRaf) {
+			this.collapseRaf.view.cancelAnimationFrame(this.collapseRaf.id);
+			this.collapseRaf = null;
 		}
 	}
 }
