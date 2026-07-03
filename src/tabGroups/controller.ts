@@ -216,7 +216,10 @@ export class TabGroupController {
 		else new Notice("The active tab isn't in a group.");
 	}
 
-	/** Move a leaf into a group (removing it from any other). */
+	/**
+	 * Move a leaf into a group (removing it from any other) and snap it next to
+	 * the group's run so the group stays a contiguous block.
+	 */
 	addLeafToGroup(leafId: string, groupId: string): void {
 		const g = this.groups.find((x) => x.id === groupId);
 		if (!g) return;
@@ -227,20 +230,50 @@ export class TabGroupController {
 		}
 		if (!g.memberIds.includes(leafId)) g.memberIds.push(leafId);
 		this.groups = this.groups.filter((x) => x.memberIds.length > 0);
+
+		const leaf = this.leafById(leafId);
+		const order = leaf ? this.orderInParent(leaf) : null;
+		if (leaf && order) {
+			const otherPos = g.memberIds
+				.filter((m) => m !== leafId)
+				.map((m) => order.indexOf(m))
+				.filter((i) => i >= 0);
+			if (otherPos.length > 0) {
+				this.moveLeafAfter(leaf, order[Math.max(...otherPos)]);
+			}
+		}
 		this.reconcile();
 	}
 
-	/** Remove a leaf from whatever group it's in (dropping emptied groups). */
+	/**
+	 * Remove a leaf from whatever group it's in (dropping emptied groups). If the
+	 * tab was in the middle of the group's run, eject it just past the group so
+	 * the group stays contiguous and never visually contains a non-member.
+	 */
 	removeLeafFromGroup(leafId: string): void {
-		let changed = false;
-		for (const g of this.groups) {
-			if (g.memberIds.includes(leafId)) {
-				g.memberIds = g.memberIds.filter((m) => m !== leafId);
-				changed = true;
+		const g = this.groups.find((x) => x.memberIds.includes(leafId));
+		if (!g) return;
+		g.memberIds = g.memberIds.filter((m) => m !== leafId);
+		this.groups = this.groups.filter((x) => x.memberIds.length > 0);
+
+		if (g.memberIds.length > 0) {
+			const leaf = this.leafById(leafId);
+			const order = leaf ? this.orderInParent(leaf) : null;
+			if (leaf && order) {
+				const removedPos = order.indexOf(leafId);
+				const memberPos = g.memberIds
+					.map((m) => order.indexOf(m))
+					.filter((i) => i >= 0);
+				const min = Math.min(...memberPos);
+				const max = Math.max(...memberPos);
+				// Only move when it's stranded *between* members; an edge tab is
+				// already outside the run.
+				if (memberPos.length > 0 && removedPos > min && removedPos < max) {
+					this.moveLeafAfter(leaf, order[max]);
+				}
 			}
 		}
-		this.groups = this.groups.filter((g) => g.memberIds.length > 0);
-		if (changed) this.reconcile();
+		this.reconcile();
 	}
 
 	/** Add our grouping items to a tab's native right-click menu. */
@@ -459,6 +492,28 @@ export class TabGroupController {
 			if (id(leaf) === leafId) found = leaf;
 		});
 		return found;
+	}
+
+	/** Leaf-id order (DOM order) of the strip that `leaf` lives in, or null. */
+	private orderInParent(leaf: WorkspaceLeaf): string[] | null {
+		const strip = headerEl(leaf)?.parentElement;
+		if (!strip) return null;
+		const parent = leaf.parent;
+		const leaves: WorkspaceLeaf[] = [];
+		this.plugin.app.workspace.iterateAllLeaves((l) => {
+			if (l.parent === parent) leaves.push(l);
+		});
+		return readOrder(strip, leaves).order;
+	}
+
+	/** Move `leaf` to sit immediately after `afterLeafId` within its strip. */
+	private moveLeafAfter(leaf: WorkspaceLeaf, afterLeafId: string): void {
+		const order = this.orderInParent(leaf);
+		if (!order) return;
+		const from = order.indexOf(id(leaf));
+		const to = order.indexOf(afterLeafId);
+		if (from < 0 || to < 0 || from === to + 1) return; // already right after
+		moveLeafToIndex(leaf, from < to ? to : to + 1);
 	}
 
 	private refreshSavedView(): void {

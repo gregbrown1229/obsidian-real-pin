@@ -108,6 +108,48 @@ test("add-to-group and remove-from-group (the tab-menu actions) work", async () 
 	assert.equal(r.removed, true, "removeLeafFromGroup takes it back out");
 });
 
+test("removing a middle tab ejects it so the group stays contiguous", async () => {
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		for (const p of ['cg-1.md','cg-2.md','cg-3.md']) await ensure(p);
+		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
+		const t1 = await open('cg-1.md'), t2 = await open('cg-2.md'), t3 = await open('cg-3.md');
+		await new Promise(r => setTimeout(r, 150));
+		const g = rp.tabGroups.createGroup([t1.id, t2.id, t3.id]);
+		await new Promise(r => setTimeout(r, 150));
+
+		const strip = t1.tabHeaderEl.parentElement;
+		const orderIds = () => [...strip.querySelectorAll(':scope > .workspace-tab-header')].map(h => {
+			let id = null; app.workspace.iterateAllLeaves(l => { if (l.tabHeaderEl === h) id = l.id; }); return id;
+		});
+
+		rp.tabGroups.removeLeafFromGroup(t2.id); // the MIDDLE tab
+		await new Promise(r => setTimeout(r, 300));
+
+		const order = orderIds();
+		const grp = rp.tabGroups.getGroups().find(x => x.id === g.id) || { memberIds: [] };
+		const memberPos = grp.memberIds.map(id => order.indexOf(id));
+		const min = Math.min(...memberPos), max = Math.max(...memberPos);
+		const t2Pos = order.indexOf(t2.id);
+		const out = {
+			t2StillMember: grp.memberIds.includes(t2.id),
+			memberCount: grp.memberIds.length,
+			contiguous: memberPos.length > 0 && (max - min === memberPos.length - 1),
+			t2Outside: t2Pos > max || t2Pos < min,
+		};
+		rp.tabGroups.ungroup(g.id);
+		t1.detach(); t2.detach(); t3.detach();
+		await new Promise(r => setTimeout(r, 100));
+		return out;
+	`);
+	assert.equal(r.t2StillMember, false, "removed tab is no longer a member");
+	assert.equal(r.memberCount, 2, "two members remain");
+	assert.equal(r.contiguous, true, "the group's members stay contiguous in the strip");
+	assert.equal(r.t2Outside, true, "the removed tab is moved outside the group's run");
+});
+
 test("clicking the chip collapses/expands — even after a re-render", async () => {
 	// Regression guard: Obsidian re-renders the strip by cloning its children,
 	// which drops a chip's per-element listeners. We force a re-render (activate
