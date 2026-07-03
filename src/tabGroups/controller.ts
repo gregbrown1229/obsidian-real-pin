@@ -38,6 +38,7 @@ type LeafInternal = WorkspaceLeaf & {
 type TabsInternal = WorkspaceParent & {
 	removeChild?(leaf: WorkspaceLeaf): void;
 	insertChild?(index: number, leaf: WorkspaceLeaf): void;
+	children?: WorkspaceLeaf[];
 };
 
 const id = (leaf: WorkspaceLeaf): string => (leaf as LeafInternal).id;
@@ -75,6 +76,8 @@ export class TabGroupController {
 	private lastSig = "";
 	/** Documents we've already wired the delegated chip click listener onto. */
 	private readonly delegatedDocs = new WeakSet<Document>();
+	/** The group being dragged by its pill (HTML5 drag), or null. */
+	private draggingGroupId: string | null = null;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -755,6 +758,114 @@ export class TabGroupController {
 			e.preventDefault();
 			this.toggleCollapse(groupId);
 		});
+
+		// Drag the pill to reorder the whole group (HTML5 drag).
+		this.plugin.registerDomEvent(doc, "dragstart", (e) => {
+			const groupId = groupIdOf(e);
+			if (!groupId) return;
+			this.draggingGroupId = groupId;
+			if (e.dataTransfer) {
+				e.dataTransfer.effectAllowed = "move";
+				e.dataTransfer.setData("text/plain", groupId);
+			}
+		});
+		this.plugin.registerDomEvent(doc, "dragover", (e) => {
+			if (!this.draggingGroupId) return;
+			const overStrip = (e.target as HTMLElement | null)?.closest?.(
+				".workspace-tab-header-container-inner",
+			);
+			if (!overStrip) return;
+			e.preventDefault(); // allow drop
+			if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+		});
+		this.plugin.registerDomEvent(doc, "drop", (e) => {
+			const groupId = this.draggingGroupId;
+			this.draggingGroupId = null;
+			if (!groupId) return;
+			const strip = (e.target as HTMLElement | null)?.closest?.(
+				".workspace-tab-header-container-inner",
+			);
+			if (!strip) return;
+			e.preventDefault();
+			this.moveGroup(groupId, this.dropBeforeLeafId(e));
+		});
+		this.plugin.registerDomEvent(doc, "dragend", () => {
+			this.draggingGroupId = null;
+		});
+	}
+
+	/** The leaf a pill-drop should land the group *before* (null = end of strip). */
+	private dropBeforeLeafId(e: DragEvent): string | null {
+		const target = e.target as HTMLElement | null;
+
+		// Dropped on another group's chip → land immediately before that whole
+		// group. This is what lets you drop *before* the first group: its chip is
+		// the leftmost element, so aiming at the far left lands on the chip.
+		const chip = target?.closest<HTMLElement>(".real-pin-group-chip");
+		if (chip) return this.firstMemberOf(chip.dataset.rpGroupId);
+
+		const header = target?.closest<HTMLElement>(".workspace-tab-header");
+		if (!header) return null;
+		const leaf = this.leafForHeader(header);
+		if (!leaf) return null;
+		const rect = header.getBoundingClientRect();
+		if (e.clientX <= rect.left + rect.width / 2) return id(leaf);
+		// Dropped on the right half — land before the next tab (or at the end).
+		const order = this.orderInParent(leaf);
+		if (!order) return id(leaf);
+		const next = order[order.indexOf(id(leaf)) + 1];
+		return next ?? null;
+	}
+
+	/** The id of a group's first member in strip order, or null. */
+	private firstMemberOf(groupId: string | undefined): string | null {
+		const g = groupId ? this.groups.find((x) => x.id === groupId) : undefined;
+		if (!g || g.memberIds.length === 0) return null;
+		const anyMember = this.leafById(g.memberIds[0]);
+		const order = anyMember ? this.orderInParent(anyMember) : null;
+		if (!order) return null;
+		return order.find((m) => g.memberIds.includes(m)) ?? null;
+	}
+
+	private leafForHeader(header: HTMLElement): WorkspaceLeaf | null {
+		let found: WorkspaceLeaf | null = null;
+		this.plugin.app.workspace.iterateAllLeaves((leaf) => {
+			if (headerEl(leaf) === header) found = leaf;
+		});
+		return found;
+	}
+
+	/**
+	 * Move a whole group so its run sits immediately before `beforeLeafId` (null =
+	 * end of the strip). Operates on the container's `children` model (mutated
+	 * synchronously by removeChild/insertChild) rather than the DOM, which lags —
+	 * so extracting the members then re-inserting them contiguously is exact.
+	 */
+	private moveGroup(groupId: string, beforeLeafId: string | null): void {
+		const g = this.groups.find((x) => x.id === groupId);
+		if (!g) return;
+		if (beforeLeafId !== null && g.memberIds.includes(beforeLeafId)) return;
+		// Suppress reconcile while the members are mid-move: a member momentarily
+		// separated from its group would otherwise be read as "dragged out" and
+		// ejected. One reconcile runs at the end, when the run is contiguous again.
+		this.cancelScheduled();
+		this.disconnectObservers();
+		for (const memberId of g.memberIds.slice()) {
+			const leaf = this.leafById(memberId);
+			if (!leaf) continue;
+			const parent = leaf.parent as TabsInternal;
+			const children = parent.children;
+			if (!children) continue;
+			const from = children.indexOf(leaf);
+			if (from < 0) continue;
+			let to = beforeLeafId
+				? children.findIndex((l) => id(l) === beforeLeafId)
+				: children.length;
+			if (to < 0) to = children.length;
+			const target = from < to ? to - 1 : to;
+			if (from !== target) moveLeafToIndex(leaf, target);
+		}
+		this.reconcile();
 	}
 
 	private showChipMenu(groupId: string, evt: MouseEvent): void {

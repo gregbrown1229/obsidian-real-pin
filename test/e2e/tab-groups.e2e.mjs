@@ -150,6 +150,87 @@ test("removing a middle tab ejects it so the group stays contiguous", async () =
 	assert.equal(r.t2Outside, true, "the removed tab is moved outside the group's run");
 });
 
+test("dragging the group pill moves the whole group", async () => {
+	// Drives the drag handlers + move logic with synthetic DragEvents (the
+	// headless harness can't initiate native OS drag-and-drop). Verifies the
+	// group relocates as a contiguous block.
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		for (const p of ['pd-1.md','pd-2.md','pd-3.md','pd-4.md']) await ensure(p);
+		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
+		const a = await open('pd-1.md'), b = await open('pd-2.md'), u1 = await open('pd-3.md'), u2 = await open('pd-4.md');
+		await new Promise(r => setTimeout(r, 150));
+		const g = rp.tabGroups.createGroup([a.id, b.id]);
+		await new Promise(r => setTimeout(r, 150));
+		const strip = a.tabHeaderEl.parentElement;
+		const orderIds = () => [...strip.querySelectorAll(':scope > .workspace-tab-header')].map(h => {
+			let id = null; app.workspace.iterateAllLeaves(l => { if (l.tabHeaderEl === h) id = l.id; }); return id;
+		});
+		// Select THIS group's chip — the strip may hold other groups' chips too.
+		const chip = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g.id + '"]');
+		const dt = new DataTransfer();
+		chip.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+		const rect = u2.tabHeaderEl.getBoundingClientRect();
+		const at = { bubbles: true, dataTransfer: dt, clientX: rect.right - 2, clientY: rect.top + rect.height / 2 };
+		u2.tabHeaderEl.dispatchEvent(new DragEvent('dragover', at));
+		u2.tabHeaderEl.dispatchEvent(new DragEvent('drop', at));
+		await new Promise(r => setTimeout(r, 300));
+		const order = orderIds();
+		const grp = rp.tabGroups.getGroups().find(x => x.id === g.id) || { memberIds: [] };
+		const pa = order.indexOf(a.id), pb = order.indexOf(b.id), pu2 = order.indexOf(u2.id);
+		const out = { members: grp.memberIds.length, contiguous: Math.abs(pa - pb) === 1, groupAfterU2: Math.min(pa, pb) > pu2 };
+		rp.tabGroups.ungroup(g.id);
+		a.detach(); b.detach(); u1.detach(); u2.detach();
+		await new Promise(r => setTimeout(r, 100));
+		return out;
+	`);
+	assert.equal(r.members, 2, "group keeps its members");
+	assert.equal(r.contiguous, true, "group stays contiguous after the move");
+	assert.equal(r.groupAfterU2, true, "the whole group moved past the other tabs");
+});
+
+test("dropping a pill on the first group's chip lands it before that group", async () => {
+	// The user can't reach the sliver left of a leading group, so dropping onto a
+	// group's chip means "place before this whole group" — that's how a group gets
+	// moved to the very start of the bar.
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		for (const p of ['bf-1.md','bf-2.md','bf-3.md','bf-4.md']) await ensure(p);
+		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
+		const g1a = await open('bf-1.md'), g1b = await open('bf-2.md'), g2a = await open('bf-3.md'), g2b = await open('bf-4.md');
+		await new Promise(r => setTimeout(r, 150));
+		const g1 = rp.tabGroups.createGroup([g1a.id, g1b.id]);
+		const g2 = rp.tabGroups.createGroup([g2a.id, g2b.id]);
+		await new Promise(r => setTimeout(r, 150));
+		const strip = g1a.tabHeaderEl.parentElement;
+		const orderIds = () => [...strip.querySelectorAll(':scope > .workspace-tab-header')].map(h => {
+			let id = null; app.workspace.iterateAllLeaves(l => { if (l.tabHeaderEl === h) id = l.id; }); return id;
+		});
+		const chip1 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g1.id + '"]');
+		const chip2 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g2.id + '"]');
+		const dt = new DataTransfer();
+		chip2.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+		const rect = chip1.getBoundingClientRect();
+		const at = { bubbles: true, dataTransfer: dt, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 };
+		chip1.dispatchEvent(new DragEvent('dragover', at));
+		chip1.dispatchEvent(new DragEvent('drop', at));
+		await new Promise(r => setTimeout(r, 300));
+		const order = orderIds();
+		const g2max = Math.max(order.indexOf(g2a.id), order.indexOf(g2b.id));
+		const g1min = Math.min(order.indexOf(g1a.id), order.indexOf(g1b.id));
+		const out = { g2BeforeG1: g2max < g1min };
+		rp.tabGroups.ungroup(g1.id); rp.tabGroups.ungroup(g2.id);
+		g1a.detach(); g1b.detach(); g2a.detach(); g2b.detach();
+		await new Promise(r => setTimeout(r, 100));
+		return out;
+	`);
+	assert.equal(r.g2BeforeG1, true, "the dragged group is placed before the group whose chip it was dropped on");
+});
+
 test("clicking the chip collapses/expands — even after a re-render", async () => {
 	// Regression guard: Obsidian re-renders the strip by cloning its children,
 	// which drops a chip's per-element listeners. We force a re-render (activate
@@ -188,17 +269,17 @@ test("dragging an ungrouped tab into the group's run joins it", async () => {
 	// Simulate Obsidian's native reorder: move c between a and b using the same
 	// internal WorkspaceTabs ops a drag performs. The controller's observer then
 	// reconciles membership from the new order.
-	const joined = await obs.evalInApp(`
-		const { a, b, c } = window.__tg;
+	const r = await obs.evalInApp(`
+		const { a, b, c, rp, groupId } = window.__tg;
 		const parent = a.parent;
 		const strip = a.tabHeaderEl.parentElement;
 		const idxOf = (leaf) => [...strip.querySelectorAll(':scope > .workspace-tab-header')].indexOf(leaf.tabHeaderEl);
 		parent.removeChild(c);
 		parent.insertChild(idxOf(b), c); // drop c just before b => inside the a..b run
-		await new Promise(r => setTimeout(r, 250));
-		return c.tabHeaderEl.dataset.rpGroup === window.__tg.groupId;
+		await new Promise(r => setTimeout(r, 300));
+		return { joined: c.tabHeaderEl.dataset.rpGroup === groupId };
 	`);
-	assert.equal(joined, true, "c joined the group after landing inside its run");
+	assert.equal(r.joined, true, "c joined the group after landing inside its run");
 });
 
 test("live groups are persisted so they survive a reload", async () => {
