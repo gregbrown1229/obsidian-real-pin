@@ -413,6 +413,52 @@ test("closing a group's last tab removes the group", async () => {
 	assert.equal(r.afterBoth, false, "closing the last tab removes the group entirely");
 });
 
+test("a tab landing right of the chip joins; landing left of it stays separate", async () => {
+	// The chip is a group's left boundary. Membership is inferred from the strip's
+	// DOM order (which is what a native drag rearranges), so we drive that order
+	// directly: reposition the ungrouped tab's header relative to the chip, then
+	// reconcile (apply) and read the result. (Real OS drag can't be scripted; this
+	// verifies the boundary logic the drag ultimately feeds.)
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		for (const p of ['cb-1.md','cb-2.md','cb-3.md']) await ensure(p);
+		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
+		const a = await open('cb-1.md'), b = await open('cb-2.md'), x = await open('cb-3.md');
+		await new Promise(r => setTimeout(r, 150));
+		const g = rp.tabGroups.createGroup([a.id, b.id]); // strip: [chip, a, b, x]
+		await new Promise(r => setTimeout(r, 150));
+		const strip = a.tabHeaderEl.parentElement;
+		const chip = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g.id + '"]');
+
+		// Land x just RIGHT of the chip (chip, x, a, b) → x is inside the left edge.
+		chip.after(x.tabHeaderEl);
+		rp.tabGroups.apply();
+		await new Promise(r => setTimeout(r, 150));
+		const joinedRight = x.tabHeaderEl.dataset.rpGroup === g.id;
+
+		// Reset x back to ungrouped for the opposite check.
+		rp.tabGroups.removeLeafFromGroup(x.id);
+		await new Promise(r => setTimeout(r, 150));
+
+		// Land x just LEFT of the chip (x, chip, a, b) → x is outside the group.
+		const chip2 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g.id + '"]');
+		strip.insertBefore(x.tabHeaderEl, chip2);
+		rp.tabGroups.apply();
+		await new Promise(r => setTimeout(r, 150));
+		const separatedLeft = !x.tabHeaderEl.dataset.rpGroup;
+
+		const out = { joinedRight, separatedLeft };
+		rp.tabGroups.ungroup(g.id);
+		a.detach(); b.detach(); x.detach();
+		await new Promise(r => setTimeout(r, 100));
+		return out;
+	`);
+	assert.equal(r.joinedRight, true, "a tab dropped just right of the chip joins the group");
+	assert.equal(r.separatedLeft, true, "a tab dropped just left of the chip stays separate");
+});
+
 test("clicking the chip collapses/expands — even after a re-render", async () => {
 	// Regression guard: Obsidian re-renders the strip by cloning its children,
 	// which drops a chip's per-element listeners. We force a re-render (activate
