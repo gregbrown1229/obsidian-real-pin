@@ -97,13 +97,6 @@ export class TabGroupController {
 	 */
 	private skipBoundaries = false;
 	private boundarySuppressTimer: number | null = null;
-	/**
-	 * While a group pill is being dragged, every group is collapsed so you
-	 * reorder whole groups without minding how many tabs each holds. This maps
-	 * each group's pre-drag collapsed state so it can be restored on drop/cancel;
-	 * null when no pill drag is in flight.
-	 */
-	private groupDragRestore: Map<string, boolean> | null = null;
 
 	constructor(plugin: RealPinPlugin) {
 		this.plugin = plugin;
@@ -210,7 +203,7 @@ export class TabGroupController {
 	 * keep everything collapsed.
 	 */
 	private expandGroupOf(leaf: WorkspaceLeaf | null): void {
-		if (!this.plugin.settings.enableTabGroups || this.groupDragRestore) return;
+		if (!this.plugin.settings.enableTabGroups) return;
 		if (!leaf) return;
 		const g = this.groups.find((x) => x.memberIds.includes(id(leaf)));
 		if (g && g.collapsed) g.collapsed = false;
@@ -602,9 +595,6 @@ export class TabGroupController {
 	 * signature so unchanged reconciles (e.g. active-leaf-change) don't write.
 	 */
 	private schedulePersist(): void {
-		// Don't persist the transient all-collapsed state a pill drag installs;
-		// the real state is written when the drag restores it.
-		if (this.groupDragRestore) return;
 		if (this.saveTimer !== null) return;
 		this.saveTimer = window.setTimeout(() => {
 			this.saveTimer = null;
@@ -855,7 +845,6 @@ export class TabGroupController {
 				e.dataTransfer.effectAllowed = "move";
 				e.dataTransfer.setData("text/plain", groupId);
 			}
-			this.collapseAllForDrag();
 		});
 		this.plugin.registerDomEvent(doc, "dragover", (e) => {
 			if (!this.draggingGroupId) return;
@@ -877,46 +866,10 @@ export class TabGroupController {
 				e.preventDefault();
 				this.moveGroup(groupId, this.dropBeforeLeafId(e));
 			}
-			// A drop ends the drag — restore the pre-drag collapsed states even if
-			// the drop missed the strip (dragend also restores; it's idempotent).
-			this.restoreAfterGroupDrag();
 		});
 		this.plugin.registerDomEvent(doc, "dragend", () => {
 			this.draggingGroupId = null;
-			this.restoreAfterGroupDrag();
 		});
-	}
-
-	/** Collapse every group for the duration of a pill drag, remembering states. */
-	private collapseAllForDrag(): void {
-		this.groupDragRestore = new Map(
-			this.groups.map((g) => [g.id, g.collapsed] as const),
-		);
-		let changed = false;
-		for (const g of this.groups) {
-			if (!g.collapsed) {
-				g.collapsed = true;
-				changed = true;
-			}
-		}
-		if (changed) this.reconcile();
-	}
-
-	/** Restore each group's pre-drag collapsed state after a pill drag ends. */
-	private restoreAfterGroupDrag(): void {
-		const restore = this.groupDragRestore;
-		if (!restore) return;
-		this.groupDragRestore = null;
-		let changed = false;
-		for (const g of this.groups) {
-			const was = restore.get(g.id);
-			if (was !== undefined && g.collapsed !== was) {
-				g.collapsed = was;
-				changed = true;
-			}
-		}
-		if (changed) this.reconcile();
-		else this.schedulePersist();
 	}
 
 	/** The leaf a pill-drop should land the group *before* (null = end of strip). */

@@ -231,40 +231,58 @@ test("dropping a pill on the first group's chip lands it before that group", asy
 	assert.equal(r.g2BeforeG1, true, "the dragged group is placed before the group whose chip it was dropped on");
 });
 
-test("dragging a group chip collapses every group and restores on dragend", async () => {
+test("dropping a group's chip onto the middle of another group doesn't split it", async () => {
+	// The reported bug: dragging a group into the middle of another split the
+	// target. Drop targets snap to the target group's outer boundary, so a group
+	// dropped anywhere on another lands before/after it as a whole — never inside.
 	const r = await obs.evalInApp(`
 		const app = window.app;
 		const rp = app.plugins.plugins['real-pin'];
 		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
-		for (const p of ['cc-1.md','cc-2.md','cc-3.md','cc-4.md']) await ensure(p);
+		for (const p of ['sp-1.md','sp-2.md','sp-3.md','sp-4.md','sp-5.md']) await ensure(p);
 		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
-		const a = await open('cc-1.md'), b = await open('cc-2.md'), c = await open('cc-3.md'), d = await open('cc-4.md');
+		const a = await open('sp-1.md'), b = await open('sp-2.md'), c = await open('sp-3.md'), d = await open('sp-4.md'), e = await open('sp-5.md');
 		await new Promise(r => setTimeout(r, 150));
-		const g1 = rp.tabGroups.createGroup([a.id, b.id]);
-		const g2 = rp.tabGroups.createGroup([c.id, d.id]);
+		const g1 = rp.tabGroups.createGroup([a.id, b.id, c.id]); // 3-tab target
+		const g2 = rp.tabGroups.createGroup([d.id, e.id]);
 		await new Promise(r => setTimeout(r, 150));
 		const strip = a.tabHeaderEl.parentElement;
-		const chip1 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g1.id + '"]');
-		const collapsedOf = (gid) => (rp.tabGroups.getGroups().find(x => x.id === gid) || {}).collapsed;
+		const orderIds = () => [...strip.querySelectorAll(':scope > .workspace-tab-header')].map(h => {
+			let id = null; app.workspace.iterateAllLeaves(l => { if (l.tabHeaderEl === h) id = l.id; }); return id;
+		});
+		const chip2 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g2.id + '"]');
 		const dt = new DataTransfer();
-		chip1.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-		await new Promise(r => setTimeout(r, 150));
-		const duringG1 = collapsedOf(g1.id), duringG2 = collapsedOf(g2.id);
-		const memberHidden = getComputedStyle(c.tabHeaderEl).display === 'none';
-		chip1.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
-		await new Promise(r => setTimeout(r, 200));
-		const afterG1 = collapsedOf(g1.id), afterG2 = collapsedOf(g2.id);
-		const out = { duringG1, duringG2, memberHidden, afterG1, afterG2 };
+		chip2.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+		// Drop on the LEFT half of g1's MIDDLE member (b) → snaps to before g1.
+		const rect = b.tabHeaderEl.getBoundingClientRect();
+		const at = { bubbles: true, dataTransfer: dt, clientX: rect.left + 2, clientY: rect.top + rect.height / 2 };
+		b.tabHeaderEl.dispatchEvent(new DragEvent('dragover', at));
+		b.tabHeaderEl.dispatchEvent(new DragEvent('drop', at));
+		chip2.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+		await new Promise(r => setTimeout(r, 300));
+		const order = orderIds();
+		const gg1 = rp.tabGroups.getGroups().find(x => x.id === g1.id) || { memberIds: [] };
+		const gg2 = rp.tabGroups.getGroups().find(x => x.id === g2.id) || { memberIds: [] };
+		const p1 = gg1.memberIds.map(id => order.indexOf(id));
+		const p2 = gg2.memberIds.map(id => order.indexOf(id));
+		const contiguous = (ps) => { const s = [...ps].sort((x, y) => x - y); return s[s.length - 1] - s[0] === s.length - 1; };
+		const out = {
+			g1Count: gg1.memberIds.length,
+			g2Count: gg2.memberIds.length,
+			g1Contiguous: contiguous(p1),
+			g2Contiguous: contiguous(p2),
+			disjoint: Math.max(...p2) < Math.min(...p1) || Math.min(...p2) > Math.max(...p1),
+		};
 		rp.tabGroups.ungroup(g1.id); rp.tabGroups.ungroup(g2.id);
-		a.detach(); b.detach(); c.detach(); d.detach();
+		a.detach(); b.detach(); c.detach(); d.detach(); e.detach();
 		await new Promise(r => setTimeout(r, 100));
 		return out;
 	`);
-	assert.equal(r.duringG1, true, "the dragged group collapses");
-	assert.equal(r.duringG2, true, "every other group also collapses while dragging");
-	assert.equal(r.memberHidden, true, "member tabs are hidden during the drag");
-	assert.equal(r.afterG1, false, "the dragged group's collapse state is restored");
-	assert.equal(r.afterG2, false, "other groups' collapse states are restored");
+	assert.equal(r.g1Count, 3, "the target group keeps all three members");
+	assert.equal(r.g2Count, 2, "the dragged group keeps its members");
+	assert.equal(r.g1Contiguous, true, "the target group is not split");
+	assert.equal(r.g2Contiguous, true, "the dragged group stays contiguous");
+	assert.equal(r.disjoint, true, "the two groups don't interleave");
 });
 
 test("dragging a group past another reorders as blocks, never splitting it", async () => {
