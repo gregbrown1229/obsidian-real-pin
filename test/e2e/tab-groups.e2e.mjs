@@ -374,6 +374,43 @@ test("dragging a pill shows a drop indicator that clears when the drag ends", as
 	assert.equal(r.goneAfter, true, "the indicator is removed when the drag ends");
 });
 
+test("hovering a gap snaps the indicator to the cursor, not the end of the bar", async () => {
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		for (const p of ['gp-1.md','gp-2.md','gp-3.md','gp-4.md']) await ensure(p);
+		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
+		const a = await open('gp-1.md'), b = await open('gp-2.md'), c = await open('gp-3.md'), d = await open('gp-4.md');
+		await new Promise(r => setTimeout(r, 150));
+		const g1 = rp.tabGroups.createGroup([a.id, b.id]);
+		const g2 = rp.tabGroups.createGroup([c.id, d.id]);
+		await new Promise(r => setTimeout(r, 150));
+		const strip = a.tabHeaderEl.parentElement;
+		const chip1 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g1.id + '"]');
+		const chip2 = strip.querySelector('.real-pin-group-chip[data-rp-group-id="' + g2.id + '"]');
+		const dt = new DataTransfer();
+		chip1.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+		// dragover the STRIP itself (not a tab/chip) with the cursor near g2's chip.
+		const cRect = chip2.getBoundingClientRect();
+		const clientX = cRect.left + 2;
+		const stripRect = strip.getBoundingClientRect();
+		strip.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt, clientX, clientY: cRect.top + cRect.height / 2 }));
+		await new Promise(r => setTimeout(r, 40));
+		const ind = activeDocument.querySelector('.real-pin-group-drop-indicator');
+		const x = ind ? parseFloat(ind.style.left) : null;
+		const out = { shown: !!ind, nearCursor: x !== null && Math.abs(x - clientX) < 60, notAtEnd: x !== null && x < stripRect.right - 100 };
+		chip1.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+		rp.tabGroups.ungroup(g1.id); rp.tabGroups.ungroup(g2.id);
+		a.detach(); b.detach(); c.detach(); d.detach();
+		await new Promise(r => setTimeout(r, 100));
+		return out;
+	`);
+	assert.equal(r.shown, true, "the indicator shows even over a gap");
+	assert.equal(r.nearCursor, true, "the indicator snaps to the boundary near the cursor");
+	assert.equal(r.notAtEnd, true, "it does not jump to the end of the bar");
+});
+
 test("dragging a single-tab group onto another does not merge it in", async () => {
 	const r = await obs.evalInApp(`
 		const app = window.app;

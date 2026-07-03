@@ -916,24 +916,59 @@ export class TabGroupController {
 		this.dropIndicator = null;
 	}
 
+	/**
+	 * The chip or tab header a pill drop should key off. When the cursor is over a
+	 * chip/tab we use it directly; when it's over a gap or the strip's padding we
+	 * snap to the nearest chip/tab by x, so the drop point (and the indicator)
+	 * never jumps to the end of the bar between tabs.
+	 */
+	private resolveDropTarget(e: DragEvent): HTMLElement | null {
+		const direct = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+			".real-pin-group-chip, .workspace-tab-header",
+		);
+		if (direct) return direct;
+		const strip = (e.target as HTMLElement | null)?.closest<HTMLElement>(
+			".workspace-tab-header-container-inner",
+		);
+		if (!strip) return null;
+		let best: HTMLElement | null = null;
+		let bestDist = Infinity;
+		strip
+			.querySelectorAll<HTMLElement>(
+				":scope > .real-pin-group-chip, :scope > .workspace-tab-header",
+			)
+			.forEach((el) => {
+				const r = el.getBoundingClientRect();
+				const dist =
+					e.clientX < r.left
+						? r.left - e.clientX
+						: e.clientX > r.right
+							? e.clientX - r.right
+							: 0;
+				if (dist < bestDist) {
+					bestDist = dist;
+					best = el;
+				}
+			});
+		return best;
+	}
+
 	/** The leaf a pill-drop should land the group *before* (null = end of strip). */
 	private dropBeforeLeafId(e: DragEvent): string | null {
-		const target = e.target as HTMLElement | null;
+		const el = this.resolveDropTarget(e);
+		if (!el) return null;
 
-		// Dropped on a group chip: left half → before that whole group (this is how
-		// you land before the first group — its chip is the leftmost element), right
+		// Over a group chip: left half → before that whole group (this is how you
+		// land before the first group — its chip is the leftmost element), right
 		// half → after it.
-		const chip = target?.closest<HTMLElement>(".real-pin-group-chip");
-		if (chip) {
-			const gid = chip.dataset.rpGroupId;
-			const rect = chip.getBoundingClientRect();
+		if (el.classList.contains("real-pin-group-chip")) {
+			const rect = el.getBoundingClientRect();
 			return this.leftHalf(e, rect)
-				? this.firstMemberOf(gid)
-				: this.afterGroup(gid);
+				? this.firstMemberOf(el.dataset.rpGroupId)
+				: this.afterGroup(el.dataset.rpGroupId);
 		}
 
-		const header = target?.closest<HTMLElement>(".workspace-tab-header");
-		if (!header) return null;
+		const header = el;
 		const leaf = this.leafForHeader(header);
 		if (!leaf) return null;
 		const rect = header.getBoundingClientRect();
