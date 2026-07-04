@@ -31,7 +31,7 @@
 	"devDependencies": {
 		"@types/node": "^16.11.6",
 		"chrome-remote-interface": "^0.34.0",
-		"esbuild": "^0.20.2",
+		"esbuild": "^0.28.1",
 		"eslint": "^9.39.4",
 		"eslint-plugin-obsidianmd": "^0.3.0",
 		"globals": "^17.7.0",
