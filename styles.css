@@ -94,18 +94,9 @@ body.real-pin-compact-pinned-tabs
 }
 
 /* A member tab: colored top band + faint tint, so a contiguous run reads as a
- * group. The run's outer corners round via `data-rp-pos`. */
+ * group. */
 body.real-pin-tab-groups .workspace-tab-header[data-rp-group] {
 	border-top: 2px solid var(--rp-c);
-	background-color: color-mix(in srgb, var(--rp-c) 12%, transparent);
-}
-body.real-pin-tab-groups .workspace-tab-header[data-rp-pos="first"],
-body.real-pin-tab-groups .workspace-tab-header[data-rp-pos="solo"] {
-	border-top-left-radius: var(--radius-m, 8px);
-}
-body.real-pin-tab-groups .workspace-tab-header[data-rp-pos="last"],
-body.real-pin-tab-groups .workspace-tab-header[data-rp-pos="solo"] {
-	border-top-right-radius: var(--radius-m, 8px);
 }
 
 /* Collapsed group: hide member tabs; only the chip remains in the strip. */
