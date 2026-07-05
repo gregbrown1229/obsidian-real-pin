@@ -12,7 +12,7 @@
 		"lint:fix": "eslint . --fix",
 		"validate": "node scripts/validate-plugin.mjs",
 		"test": "node --test scripts/*.test.mjs",
-		"test:e2e": "node --test test/e2e/*.e2e.mjs",
+		"test:e2e": "node --test --test-concurrency=1 test/e2e/*.e2e.mjs",
 		"check": "npm run validate && npm run lint && npm run typecheck && npm test",
 		"version": "node version-bump.mjs && node scripts/validate-plugin.mjs && git add manifest.json versions.json",
 		"prepare": "git config core.hooksPath .githooks || true"
