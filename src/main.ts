@@ -163,8 +163,18 @@ export default class RealPinPlugin extends Plugin {
 						// normally would (pinned or not).
 						if (checking) return next.call(this, true);
 
-						// The active view's leaf is the tab the close command targets.
-						const leaf = app.workspace.getActiveViewOfType(View)?.leaf;
+						// Resolve the tab the close command targets. Normally that's the
+						// active view's leaf — but after the sole unpinned tab is closed,
+						// Obsidian can leave a pinned tab *displayed but unfocused* (no
+						// active view), and `workspace:close` still targets it. Fall back
+						// to the most-recently-active leaf so that visible-but-unfocused
+						// pinned tab is guarded too, instead of slipping through the
+						// `!leaf` branch and closing unconfirmed. `getMostRecentLeaf` is
+						// public since 0.15.4 (well under minAppVersion) and searches the
+						// root split + popouts, i.e. the tab strips `close` acts on.
+						const leaf =
+							app.workspace.getActiveViewOfType(View)?.leaf ??
+							app.workspace.getMostRecentLeaf();
 						// `getViewState().pinned` is the public read accessor for pin
 						// state (the bare `leaf.pinned` field isn't typed).
 						if (!leaf || !leaf.getViewState().pinned) {
