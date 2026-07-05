@@ -3,14 +3,15 @@
 // can't reach: it lives entirely in the `workspace:close` command patch
 // (src/main.ts) and depends on real Obsidian workspace state.
 //
-// The regression it guards (reported bug): with exactly one unpinned tab open
-// plus one or more pinned tabs, closing the unpinned tab leaves a pinned tab
-// "visible but not selected" — Obsidian displays it without making it the
-// focused/active leaf. In that state `getActiveViewOfType(View)` is null, so the
-// patch used to treat the close as "no pinned tab here" and let it through: a
-// second Cmd+W closed the pinned tab with NO confirmation modal. The fix falls
-// back to the most-recently-active leaf so that visible-but-unfocused pinned tab
-// is still guarded.
+// The regression it guards (reported bug): `workspace:close` closes the active
+// tab group's current tab, but the patch used to inspect the *focused* view's
+// leaf. Those diverge whenever focus isn't in the current tab — with the file
+// explorer (or any sidebar leaf) focused, or with nothing focused after the sole
+// unpinned tab is closed. There the patch saw an unpinned sidebar leaf, or null,
+// judged "no pinned tab here", and let Cmd+W close the still-visible pinned tab
+// with NO confirmation modal. The fix resolves the target with
+// `getMostRecentLeaf()` — the main-area tab `close` actually acts on — so the
+// pinned tab is guarded no matter where focus is.
 //
 // Run with `npm run test:e2e` (needs a display — CI wraps it in `xvfb-run`).
 // `npm run build` must have run first so the plugin's main.js exists.
@@ -117,13 +118,44 @@ test("Cmd+W on a focused pinned tab asks for confirmation (and closes nothing un
 	assert.equal(r.after, r.before, "nothing closes while the prompt is open");
 });
 
+test("REGRESSION (file explorer focus): Cmd+W with focus in the file explorer still prompts for the pinned tab", async () => {
+	// The reported repro: a pinned tab is the current main-area tab, but focus is
+	// in the file explorer (left pane). Cmd+W closes the current main tab, not the
+	// focused sidebar leaf — so the pre-fix guard, which read the focused leaf,
+	// saw an unpinned file-explorer leaf and let the pinned tab close unprompted.
+	await reset();
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const cp = window.__cp;
+		await cp.open('cp-1.md', true); // pinned main tab, current + active
+		await new Promise((r) => setTimeout(r, 150));
+
+		// Move focus to the file explorer, exactly like the report.
+		const fe = app.workspace.getLeavesOfType('file-explorer')[0];
+		if (fe) app.workspace.setActiveLeaf(fe, { focus: true });
+		await new Promise((r) => setTimeout(r, 150));
+
+		const focusedExplorer = !!fe;
+		const pinnedBefore = cp.pinnedCount();
+		cp.close();                     // Cmd+W while the file explorer is focused
+		await new Promise((r) => setTimeout(r, 250));
+		const modal = !!cp.confirmModal();
+		const pinnedAfter = cp.pinnedCount();
+		cp.dismissModal();
+		return { focusedExplorer, pinnedBefore, pinnedAfter, modal };
+	`);
+	assert.equal(r.focusedExplorer, true, "precondition: the file explorer leaf was focused");
+	assert.equal(r.modal, true, "Cmd+W with sidebar focus still prompts for the pinned main tab");
+	assert.equal(r.pinnedAfter, r.pinnedBefore, "no pinned tab is closed without confirmation");
+});
+
 test("REGRESSION (natural flow): closing the sole unpinned tab then Cmd+W never loses a pinned tab without a prompt", async () => {
 	// The reported flow, unforced: N pinned tabs + one unpinned tab; close the
-	// unpinned tab, then press Cmd+W. Obsidian is left displaying a pinned tab that
-	// may not be the focused/active leaf (activeLeaf null) — the state where the
-	// pre-fix guard read getActiveViewOfType() as null and let the close through.
-	// The invariant must hold whatever the intermediate focus state: that second
-	// Cmd+W prompts and closes nothing.
+	// unpinned tab, then press Cmd+W. Obsidian moves focus off the main tab (to the
+	// file explorer, or nowhere), yet the pinned tab is still what `close` targets.
+	// getMostRecentLeaf() resolves that main-area tab regardless of focus, so the
+	// invariant holds whatever the intermediate focus state: Cmd+W prompts, nothing
+	// closes.
 	await reset();
 	const r = await obs.evalInApp(`
 		const app = window.app;
@@ -136,33 +168,24 @@ test("REGRESSION (natural flow): closing the sole unpinned tab then Cmd+W never 
 		u.detach();                                // close the sole unpinned tab
 		await new Promise((r) => setTimeout(r, 250));
 
-		// Diagnostics (not assertions): whether Obsidian naturally left no focused
-		// leaf, and whether the most-recent main-area leaf the fix falls back to is
-		// pinned. These document that the real flow reaches the fallback path.
-		const naturallyNoActiveLeaf = app.workspace.activeLeaf == null;
-		const mr = app.workspace.getMostRecentLeaf();
-		let mostRecentPinned = null; try { mostRecentPinned = mr ? !!mr.getViewState().pinned : null; } catch {}
-
 		const pinnedBefore = cp.pinnedCount();
 		cp.close();                                // the second Cmd+W
 		await new Promise((r) => setTimeout(r, 250));
 		const modal = !!cp.confirmModal();
 		const pinnedAfter = cp.pinnedCount();
 		cp.dismissModal();
-		return { naturallyNoActiveLeaf, mostRecentPinned, pinnedBefore, pinnedAfter, modal };
+		return { pinnedBefore, pinnedAfter, modal };
 	`);
-	// Whatever the intermediate focus state, the safety invariant holds:
 	assert.equal(r.modal, true, "Cmd+W after the unpinned tab is gone prompts before touching a pinned tab");
 	assert.equal(r.pinnedAfter, r.pinnedBefore, "no pinned tab is closed without confirmation");
 });
 
-test("REGRESSION (forced state): a visible-but-unfocused pinned tab still routes through the fallback and prompts", async () => {
-	// Deterministic companion to the natural-flow test: force the exact
-	// "displayed but not selected" state the video shows — a pinned tab is the most
-	// recent main-area leaf while nothing is the focused/active leaf — so the
-	// getMostRecentLeaf() fallback is exercised on every run, not only when
-	// Obsidian happens to clear focus. Pre-fix, getActiveViewOfType() was null here
-	// and the close slipped through unconfirmed.
+test("REGRESSION (no active leaf): a displayed-but-unfocused pinned tab is resolved and prompts", async () => {
+	// The "visible but not selected" state from the video: a pinned tab is the
+	// current main-area tab while nothing is the focused/active leaf. Forced here
+	// so it runs deterministically. getMostRecentLeaf() returns the pinned tab even
+	// with activeLeaf null, so the prompt fires; pre-fix, the focused-leaf read was
+	// null and the close slipped through.
 	await reset();
 	const r = await obs.evalInApp(`
 		const app = window.app;
@@ -188,7 +211,7 @@ test("REGRESSION (forced state): a visible-but-unfocused pinned tab still routes
 		return { noActiveLeaf, pinnedBefore, pinnedAfter, modal };
 	`);
 	assert.equal(r.noActiveLeaf, true, "precondition: no active leaf (the visible-but-unfocused state)");
-	assert.equal(r.modal, true, "the fallback resolves the visible pinned tab and prompts");
+	assert.equal(r.modal, true, "the pinned tab is resolved and prompts even with no active leaf");
 	assert.equal(r.pinnedAfter, r.pinnedBefore, "no pinned tab is closed without confirmation");
 });
 
