@@ -12,7 +12,7 @@ Effort: **S** = under half a day, **M** = 1–2 days.
 | Plan | Title | Effort | Depends on |
 | --- | --- | --- | --- |
 | [a1](a1-focus-open-saved-group.md) | Focus instead of duplicating an already-open saved group | S | — |
-| [a2](a2-block-mode-notice.md) | Notice feedback when block mode refuses a close | S | — |
+| [a2](a2-block-mode-settings-copy.md) | Make the silent block mode discoverable in settings copy | S | — |
 | [a3](a3-confirm-modal-keyboard.md) | Keyboard-fluent confirm modal (focus the confirm button) | S | — (see note in a4) |
 | [a4](a4-confirm-saved-group-delete.md) | Confirm before deleting a saved group | S | a3 (soft: generalizes the same modal) |
 | [a5](a5-guard-commands-when-disabled.md) | Stop tab-group commands from silently mutating hidden state | S | — |
