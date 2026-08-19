@@ -8,7 +8,7 @@ export interface GroupEditResult {
 }
 
 /**
- * Edit a group's name and color. Mirrors `ConfirmCloseModal`'s promise-based
+ * Edit a group's name and color. Mirrors `ConfirmModal`'s promise-based
  * `ask()`: resolves the chosen values, or `null` on cancel/Esc/click-outside.
  * The color swatches reuse the same `data-rp-color` → `--rp-c` mapping in
  * `styles.css` as the chips, so there's one source of truth for the palette.

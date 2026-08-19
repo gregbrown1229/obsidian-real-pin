@@ -1,6 +1,6 @@
 import { Plugin, WorkspaceLeaf } from "obsidian";
 import { around } from "monkey-around";
-import { ConfirmCloseModal } from "./ConfirmCloseModal";
+import { ConfirmModal } from "./ConfirmModal";
 import { CompactPinnedTabs } from "./compactPinnedTabs";
 import { TabGroupController } from "./tabGroups/controller";
 import {
@@ -193,9 +193,15 @@ export default class RealPinPlugin extends Plugin {
 						// Obsidian doesn't await command callbacks, so fire the modal
 						// and run the original close only on confirm. Return true to
 						// mark the invocation handled.
-						void new ConfirmCloseModal(app).ask().then((confirmed) => {
-							if (confirmed) next.call(this, false);
-						});
+						void new ConfirmModal(app, {
+							title: "Close pinned tab?",
+							body: "This tab is pinned. Are you sure you want to close it?",
+							confirmText: "Close tab",
+						})
+							.ask()
+							.then((confirmed) => {
+								if (confirmed) next.call(this, false);
+							});
 						return true;
 					},
 			}),
