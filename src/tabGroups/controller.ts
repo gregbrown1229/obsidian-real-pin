@@ -423,6 +423,30 @@ export class TabGroupController {
 		const saved = this.plugin.getSavedGroups().find((s) => s.id === savedId);
 		if (!saved) return;
 		const ws = this.plugin.app.workspace;
+
+		// Already open? Focus the live group instead of duplicating its tabs. A
+		// saved group stays linked to the live group it was saved from (Chrome's
+		// "living" saved group); if that group is still on screen, reopening would
+		// open a second copy of every tab. Find its first still-open member, expand
+		// the group if collapsed, and focus it. (`pruneClosedGroups` drops a live
+		// group once all its members are closed, so a surviving link implies at
+		// least one open member — the reopen path below runs only when the group is
+		// truly gone.)
+		const linked = saved.linkedLiveGroupId
+			? this.groups.find((g) => g.id === saved.linkedLiveGroupId)
+			: undefined;
+		if (linked) {
+			const openMember = linked.memberIds
+				.map((m) => this.leafById(m))
+				.find((leaf): leaf is WorkspaceLeaf => leaf != null);
+			if (openMember) {
+				linked.collapsed = false;
+				ws.setActiveLeaf(openMember, { focus: true });
+				this.reconcile();
+				return;
+			}
+		}
+
 		const newIds: string[] = [];
 		for (const member of saved.members) {
 			let leaf: WorkspaceLeaf;
@@ -518,7 +542,16 @@ export class TabGroupController {
 		return members;
 	}
 
+	/**
+	 * Resolve a leaf by its stable id. Prefers Obsidian's own `getLeafById`
+	 * (reliable for deferred/background tabs) through the guarded cast, and only
+	 * falls back to an `iterateAllLeaves` scan on builds older than 1.5.1, where
+	 * `getLeafById` is absent. That scan can under-report deferred tabs (see
+	 * CLAUDE.md), so we avoid it whenever the real lookup exists.
+	 */
 	private leafById(leafId: string): WorkspaceLeaf | null {
+		const ws = this.plugin.app.workspace as unknown as WorkspaceWithLeafById;
+		if (typeof ws.getLeafById === "function") return ws.getLeafById(leafId);
 		let found: WorkspaceLeaf | null = null;
 		this.plugin.app.workspace.iterateAllLeaves((leaf) => {
 			if (id(leaf) === leafId) found = leaf;

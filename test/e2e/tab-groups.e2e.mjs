@@ -647,29 +647,80 @@ test("live groups are persisted so they survive a reload", async () => {
 	assert.equal(persisted.hasMembers, true, "its members are persisted");
 });
 
-test("saving a group then reopening it restores its tabs as a group", async () => {
+test("reopening a saved group whose live group is still open focuses it instead of duplicating", async () => {
+	// Regression guard for the duplicate-tabs bug: a saved group stays linked to
+	// the live group it came from. If that group is still on screen, "Open" must
+	// focus it, not open a second copy of every tab.
 	const r = await obs.evalInApp(`
 		const rp = window.__tg.rp;
 		rp.tabGroups.saveGroup(window.__tg.groupId);
 		await new Promise(r => setTimeout(r, 120));
 		const saved = rp.getSavedGroups();
-		const s = saved[saved.length - 1];
-		const savedCount = s.members.length;
+		const s = saved.find(x => x.linkedLiveGroupId === window.__tg.groupId) || saved[saved.length - 1];
+		const strip = window.__tg.a.tabHeaderEl.parentElement;
+		const countTabs = () => strip.querySelectorAll(':scope > .workspace-tab-header').length;
+		const groupsBefore = rp.tabGroups.getGroups().length;
+		const tabsBefore = countTabs();
 		await rp.tabGroups.openSavedGroup(s.id);
 		await new Promise(r => setTimeout(r, 350));
-		const reopened = rp.tabGroups.getGroups().find(g => g.name === s.name && g.id !== window.__tg.groupId);
 		return {
-			savedCount,
-			reopenedExists: !!reopened,
-			reopenedMembers: reopened ? reopened.memberIds.length : 0,
-			savedColor: s.color,
-			reopenedColor: reopened ? reopened.color : null,
+			savedCount: s.members.length,
+			groupsBefore,
+			groupsAfter: rp.tabGroups.getGroups().length,
+			tabsBefore,
+			tabsAfter: countTabs(),
+			sameNameGroups: rp.tabGroups.getGroups().filter(g => g.name === s.name).length,
 		};
 	`);
 	assert.ok(r.savedCount >= 2, "saved group captured its members");
-	assert.equal(r.reopenedExists, true, "reopening creates a live group with the saved name");
-	assert.equal(r.reopenedMembers, r.savedCount, "every member reopened");
-	assert.equal(r.reopenedColor, r.savedColor, "color preserved on reopen");
+	assert.equal(r.groupsAfter, r.groupsBefore, "no new live group is created when the group is already open");
+	assert.equal(r.tabsAfter, r.tabsBefore, "reopening an already-open group opens no duplicate tabs");
+	assert.equal(r.sameNameGroups, 1, "exactly one live group carries the saved name");
+});
+
+test("reopening a saved group after its tabs are closed restores it as a live group", async () => {
+	// The genuine restore path: once the linked live group is closed (and pruned),
+	// "Open" recreates the tabs and regroups them with the saved name and color.
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		for (const p of ['rs-1.md','rs-2.md']) await ensure(p);
+		const open = async (p) => { const l = app.workspace.getLeaf('tab'); await l.openFile(app.vault.getAbstractFileByPath(p)); return l; };
+		const a = await open('rs-1.md'), b = await open('rs-2.md');
+		await new Promise(r => setTimeout(r, 150));
+		const g = rp.tabGroups.createGroup([a.id, b.id]);
+		await new Promise(r => setTimeout(r, 120));
+		rp.tabGroups.saveGroup(g.id);
+		await new Promise(r => setTimeout(r, 120));
+		const s = rp.getSavedGroups().find(x => x.linkedLiveGroupId === g.id);
+		const savedCount = s.members.length;
+		a.detach(); b.detach(); // close the live group's tabs -> it prunes
+		await new Promise(r => setTimeout(r, 350));
+		const liveGoneAfterClose = !rp.tabGroups.getGroups().find(x => x.id === g.id);
+		await rp.tabGroups.openSavedGroup(s.id);
+		await new Promise(r => setTimeout(r, 400));
+		const reopened = rp.tabGroups.getGroups().find(x => x.name === s.name);
+		const out = {
+			savedCount,
+			liveGoneAfterClose,
+			reopenedExists: !!reopened,
+			reopenedMembers: reopened ? reopened.memberIds.length : 0,
+			reopenedColor: reopened ? reopened.color : null,
+			savedColor: s.color,
+		};
+		// Cleanup: ungroup, close the reopened tabs, drop the saved entry.
+		if (reopened) rp.tabGroups.ungroup(reopened.id);
+		app.workspace.iterateAllLeaves(l => { const f = l.getViewState()?.state?.file; if (f === 'rs-1.md' || f === 'rs-2.md') l.detach(); });
+		rp.tabGroups.deleteSavedGroup(s.id);
+		await new Promise(r => setTimeout(r, 150));
+		return out;
+	`);
+	assert.ok(r.savedCount >= 2, "saved group captured its members");
+	assert.equal(r.liveGoneAfterClose, true, "closing all members prunes the live group");
+	assert.equal(r.reopenedExists, true, "reopening after close restores the group");
+	assert.equal(r.reopenedMembers, r.savedCount, "every saved member reopened");
+	assert.equal(r.reopenedColor, r.savedColor, "color preserved on restore");
 });
 
 test("the saved-groups panel lists saved groups", async () => {
