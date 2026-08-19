@@ -27,14 +27,31 @@ e2e regression flags the lapse within a day — but per prime directive 2 this
 needs explicit human approval before implementation. **Do not start without
 that sign-off recorded in the PR.**
 
-## Step 0 — spike S9 (required)
+## Step 0 — spike S9: **done**, premise confirmed
 
-Add a spike to `test/e2e/spikes/` using the existing harness: CDP
-`Input.dispatchMouseEvent` supports `button: 'middle'`. Determine empirically
-which event closes a tab (`mousedown` button 1, `mouseup`, `auxclick`; and
-`click` vs `mousedown` for the × button) by suppressing each in turn and
-recording which suppression prevents the close. Design from evidence, not
-guesswork. Record findings in `test/e2e/spikes/FINDINGS.md`.
+Probed against a real headless Obsidian:
+
+- **The gap is real.** A middle-click on a **pinned** tab closes it. (Unpinned
+  closes too, confirming the gesture was actually exercised.)
+- **The × is real.** A pinned tab's header does contain a
+  `.workspace-tab-header-inner-close-button` — one per header.
+- **The harness can drive it.** Obsidian implements middle-click closing in its
+  own JS listeners, so a *synthetic* `MouseEvent` sequence (`mousedown` /
+  `mouseup` / `auxclick`, `button: 1`) triggers the close — no CDP
+  `Input.dispatchMouseEvent` needed. This is unlike native OS drag, which can't
+  be scripted. **So b1 is fully e2e-testable.**
+
+Still unknown, and worth one more probe before writing the guard: **which** of
+those three events Obsidian actually closes on. Determine it by suppressing each
+in turn (capture-phase `preventDefault` + `stopImmediatePropagation`) and
+recording which suppression prevents the close — then guard only that event, so
+the suppression stays as narrow as possible.
+
+Note the related finding that retired b2/b7: Obsidian **does** already spare
+pinned tabs in `close-others` / `close-tab-group`. That it does *not* spare them
+on middle-click looks like an inconsistency on Obsidian's side rather than a
+deliberate stance — worth mentioning if this is ever raised upstream, which
+would be the cleanest fix of all.
 
 ## Implementation sketch
 

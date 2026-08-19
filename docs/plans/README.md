@@ -24,13 +24,13 @@ Effort: **S** = under half a day, **M** = 1–2 days.
 
 | Plan | Title | Effort | Depends on |
 | --- | --- | --- | --- |
-| [b1](b1-close-guard-middle-click.md) | Middle-click and tab-× close protection | M | **Human sign-off required**; spike first |
-| [b2](b2-protect-close-others.md) | Pinned-aware "Close others" / "Close this tab group" | M | b7 recommended first (shares enumeration helper) |
+| [b1](b1-close-guard-middle-click.md) | Middle-click and tab-× close protection | M | **Human sign-off required** (premise confirmed, see plan) |
+| ~~b2~~ | ~~Pinned-aware "Close others" / "Close this tab group"~~ — **dropped**, Obsidian already does this | — | — |
 | [b3](b3-close-group-chip-actions.md) | "Close group" / "Save and close group" chip actions | S/M | a4 (generalized confirm modal) |
 | [b4](b4-pin-whole-group.md) | Pin/unpin a whole group | S | — |
 | [b5](b5-keyboard-group-navigation.md) | Keyboard group navigation and move commands | M | — |
 | [b6](b6-open-saved-group-in-split-window.md) | Open a saved group in a split or new window | M | a1 (focus-if-open precedence) |
-| [b7](b7-close-unpinned-in-group.md) | "Close all unpinned tabs in this tab group" command | S | — |
+| ~~b7~~ | ~~"Close all unpinned tabs in this tab group" command~~ — **dropped**, that is the built-in | — | — |
 | [b8](b8-mobile-gating.md) | Mobile gating for tab-group settings | S | — |
 
 ## Dependency map
@@ -38,19 +38,15 @@ Effort: **S** = under half a day, **M** = 1–2 days.
 ```
 a4 ──▶ b3
 a1 ──▶ b6
-b7 ──(recommended)▶ b2
-b1 ──▶ (blocked on human approval + spike S9)
+b1 ──▶ (blocked on human approval; premise verified)
 everything else: independent
 ```
 
 - **a4 → b3:** b3's pinned-member confirmation reuses the generalized modal.
 - **a1 → b6:** b6 keeps a1's "focus if already open" as the uniform precedence
   rule for every open target, so a1's check must exist first.
-- **b7 → b2 (recommended, not required):** both enumerate a strip's unpinned
-  tabs and detach them; land b7 first and b2 reuses its helper.
 - **b1** must not start until a human approves the capture-phase interception
-  mechanism (CLAUDE.md prime directive 2) and spike S9 has determined which
-  event Obsidian closes on.
+  mechanism (CLAUDE.md prime directive 2). Spike S9 is **done** — see the plan.
 
 ## Dropped plans
 
@@ -65,11 +61,32 @@ everything else: independent
   steals focus exactly once — achievable, just not worth doing.) Closed unmerged
   as #15.
 
+- **b2 (pinned-aware "Close others" / "Close this tab group") — dropped, don't
+  retry.** Obsidian already skips pinned tabs in both. Probed against a real
+  Obsidian with 2 pinned + 2 unpinned tabs open (active tab unpinned):
+  `workspace:close-others` left **both pinned** (closing only the unpinned
+  other), and `workspace:close-tab-group` left **both pinned** while closing
+  both unpinned. b2 would have monkey-patched two commands to add protection
+  that already exists. The README's "Scope" section claimed the opposite; fixed
+  in #22.
+
+- **b7 ("Close all unpinned tabs in this tab group") — dropped, don't retry.**
+  That is precisely what the built-in `workspace:close-tab-group` does (same
+  probe as b2: it closed both unpinned tabs and kept both pinned). Shipping our
+  own command would duplicate a built-in under a different name.
+
+- **a6's `setDynamicTooltip()` item — dropped.** Obsidian deprecated the method:
+  "the value is now always shown inline next to the slider". The platform
+  already shows the pixel value; adding the call would only trip
+  `no-deprecated`. (Related: `PluginSettingTab.display()` is deprecated too, so
+  re-rendering a settings tab to show/hide a dependent control is out — toggle
+  the `Setting`'s `settingEl` instead. See #19.)
+
 ## Recommended order
 
-1. **Wave 1 (no approvals):** a1, a2, a4–a8, b7, b8 — all independent.
+1. **Wave 1 (no approvals):** a1, a2, a4–a8, b8 — all independent.
 2. **Wave 2:** b3 + b4 (chip-menu cluster), then b5.
-3. **Wave 3:** b1 (after sign-off + spike), then b2, b6.
+3. **Wave 3:** b1 (after sign-off), then b6.
 
 ## Ground rules (apply to every plan)
 
