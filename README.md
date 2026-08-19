@@ -11,7 +11,7 @@ Because it hooks the command rather than a specific key, it works no matter whic
 **Confirm before closing a pinned tab** (default: on)
 
 - **On** — closing a pinned tab via a hotkey/command pops the confirmation dialog. Confirm to close, cancel (or `Esc`) to keep it.
-- **Off** — closing a pinned tab that way is blocked entirely: no dialog, the tab never closes. Unpin it first to close it by keyboard.
+- **Off** — closing a pinned tab that way is blocked silently: the hotkey does nothing, no dialog appears, and the tab never closes. Unpin it first to close it by keyboard.
 
 The toggle takes effect immediately — no reload needed.
 

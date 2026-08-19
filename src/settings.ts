@@ -60,7 +60,8 @@ export class RealPinSettingTab extends PluginSettingTab {
 			.setName("Confirm before closing a pinned tab")
 			.setDesc(
 				"On: closing a pinned tab via a hotkey or command asks for confirmation. " +
-					"Off: closing a pinned tab that way is blocked entirely.",
+					"Off: that close is blocked silently — the hotkey does nothing and no " +
+					"dialog appears. Unpin the tab to close it by keyboard.",
 			)
 			.addToggle((toggle) =>
 				toggle
