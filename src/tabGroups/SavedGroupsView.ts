@@ -35,13 +35,24 @@ export class SavedGroupsView extends ItemView {
 		root.empty();
 		root.addClass("real-pin-saved-groups");
 
+		// The ribbon icon opens this panel whether or not tab groups are enabled, so
+		// say so plainly instead of giving instructions that can't be followed.
+		const enabled = this.plugin.settings.enableTabGroups;
 		const saved = this.plugin.getSavedGroups();
 		if (saved.length === 0) {
 			root.createEl("p", {
 				cls: "real-pin-saved-empty",
-				text: "No saved groups yet. Create a tab group, then save it from the chip menu.",
+				text: enabled
+					? "No saved groups yet. Create a tab group, then save it from the chip menu."
+					: "Tab groups are turned off. Turn them on in the plugin's settings, then group some tabs and save them here.",
 			});
 			return;
+		}
+		if (!enabled) {
+			root.createEl("p", {
+				cls: "real-pin-saved-empty",
+				text: "Tab groups are turned off. Turn them on in the plugin's settings to open these again as groups.",
+			});
 		}
 
 		for (const group of saved) {
@@ -121,5 +132,16 @@ function memberLabel(member: SavedMember): string {
 		const base = file.split("/").pop() ?? file;
 		return base.replace(/\.md$/, "");
 	}
-	return member.viewState.type;
+	// A non-file tab (graph, canvas, a plugin's view) only carries its view type,
+	// which is a developer token like "file-explorer". Obsidian exposes no public
+	// type→display-name lookup, so tidy the token itself: that reads well for any
+	// view, including ones from plugins we've never heard of, and can't go stale
+	// the way a hardcoded table of core view types would.
+	return prettifyViewType(member.viewState.type);
+}
+
+/** "local-graph" → "Local graph". */
+function prettifyViewType(type: string): string {
+	const words = type.replace(/[-_]+/g, " ").trim();
+	return words.charAt(0).toUpperCase() + words.slice(1);
 }
