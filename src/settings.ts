@@ -98,25 +98,17 @@ export class RealPinSettingTab extends PluginSettingTab {
 	}
 
 	private addCompactPinnedTabsSetting(containerEl: HTMLElement): void {
-		new Setting(containerEl)
-			.setName("Compact pinned tabs")
+		new Setting(containerEl).setName("Compact pinned tabs").setHeading();
+
+		const enable = new Setting(containerEl)
+			.setName("Enable compact pinned tabs")
 			.setDesc(
 				"Shrink pinned tabs to icon-only (hover shows the title). For a row of " +
 					"distinct icons, assign them with a plugin like Iconize — a pinned tab " +
 					"without one shows Obsidian's default file icon. Takes effect immediately.",
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.compactPinnedTabs)
-					.onChange(async (value) => {
-						this.plugin.settings.compactPinnedTabs = value;
-						await this.plugin.saveSettings();
-						// Apply live (undebounced) so the toggle feels instant.
-						this.plugin.compactTabs.apply();
-					}),
 			);
 
-		new Setting(containerEl)
+		const width = new Setting(containerEl)
 			.setName("Compact tab width")
 			.setDesc(
 				"How narrow a compacted pinned tab shrinks to (pixels). Increase it if " +
@@ -133,5 +125,24 @@ export class RealPinSettingTab extends PluginSettingTab {
 						this.plugin.compactTabs.apply();
 					}),
 			);
+
+		// The width only does anything while tabs are actually being compacted, so
+		// it follows the toggle rather than sitting there inert.
+		const syncWidth = (): void =>
+			width.settingEl.toggle(this.plugin.settings.compactPinnedTabs);
+
+		enable.addToggle((toggle) =>
+			toggle
+				.setValue(this.plugin.settings.compactPinnedTabs)
+				.onChange(async (value) => {
+					this.plugin.settings.compactPinnedTabs = value;
+					await this.plugin.saveSettings();
+					// Apply live (undebounced) so the toggle feels instant.
+					this.plugin.compactTabs.apply();
+					syncWidth();
+				}),
+		);
+
+		syncWidth();
 	}
 }
