@@ -681,6 +681,58 @@ test("the saved-groups panel lists saved groups", async () => {
 	assert.ok(rows >= 1, "panel renders at least one saved group");
 });
 
+test("the panel labels a non-file member readably and explains when the feature is off", async () => {
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const wasEnabled = rp.settings.enableTabGroups;
+		rp.settings.enableTabGroups = true;
+		rp.tabGroups.apply();
+		await new Promise(r => setTimeout(r, 150));
+
+		// A tab with no file behind it — its saved member carries only a view type.
+		const leaf = app.workspace.getLeaf('tab');
+		await leaf.setViewState({ type: 'graph', active: true });
+		await new Promise(r => setTimeout(r, 300));
+		const g = rp.tabGroups.createGroup([leaf.id]);
+		await new Promise(r => setTimeout(r, 150));
+		rp.tabGroups.saveGroup(g.id);
+		await new Promise(r => setTimeout(r, 150));
+		const s = rp.getSavedGroups().find(x => x.linkedLiveGroupId === g.id);
+
+		await rp.activateSavedGroupsView();
+		await new Promise(r => setTimeout(r, 300));
+		const view = app.workspace.getLeavesOfType('real-pin-saved-groups')[0].view;
+		const panelText = () => view.contentEl.textContent;
+		const savedType = s.members[0].viewState.type;
+		const labels = panelText();
+
+		// Now turn the feature off and re-render: the panel must explain itself
+		// rather than leave the user at a dead end.
+		rp.settings.enableTabGroups = false;
+		rp.tabGroups.apply();
+		view.render();
+		await new Promise(r => setTimeout(r, 200));
+		const offText = panelText();
+
+		rp.settings.enableTabGroups = true;
+		rp.tabGroups.apply();
+		await new Promise(r => setTimeout(r, 150));
+		rp.tabGroups.ungroup(g.id);
+		rp.tabGroups.deleteSavedGroup(s.id);
+		leaf.detach();
+		rp.settings.enableTabGroups = wasEnabled;
+		rp.tabGroups.apply();
+		view.render();
+		await new Promise(r => setTimeout(r, 200));
+		return { savedType, labels, offText };
+	`);
+	assert.equal(r.savedType, "graph", "precondition: the member is stored as a bare view type");
+	assert.match(r.labels, /Graph/, "the panel shows a readable label, not the raw view type");
+	assert.doesNotMatch(r.labels, /(^|[^A-Za-z])graph([^A-Za-z]|$)/, "the raw lowercase token isn't shown");
+	assert.match(r.offText, /Tab groups are turned off/, "with the feature off the panel says so instead of dead-ending");
+});
+
 test("disabling the feature reverts every tab and removes chips", async () => {
 	const r = await obs.evalInApp(`
 		const rp = window.__tg.rp;
