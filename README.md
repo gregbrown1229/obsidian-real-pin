@@ -46,8 +46,8 @@ Because Obsidian has no grouping API for the tab bar, this tags tab headers and 
 
 - ✅ `Cmd+W` / `Ctrl+W` and any custom hotkey bound to **Close current tab**
 - ✅ Running **Close current tab** from the command palette
-- ❌ Middle-click or right-click → **Close** on a tab (these bypass the command — by design)
-- ❌ **Close others** / **Close tab group**
+- ✅ **Close others** / **Close this tab group** — Obsidian already skips pinned tabs in these, so they close only the unpinned ones. Real Pin doesn't need to intervene.
+- ❌ Middle-click or right-click → **Close** on a tab, and the tab's **×** button (these bypass the command, so a pinned tab does close)
 
 ## Install (manual)
 
