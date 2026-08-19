@@ -188,3 +188,80 @@ test("turning the setting off reverts every tab", async () => {
 		`compact cap lifted (got ${r.maxWidth})`,
 	);
 });
+
+test("the settings tab groups features and shows the width only while compacting is on", async () => {
+	// Drives the real settings UI: open Real Pin's tab and read what it renders.
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const wasOn = rp.settings.compactPinnedTabs;
+
+		app.setting.open();
+		app.setting.openTabById('real-pin');
+		await new Promise(r => setTimeout(r, 300));
+		const root = app.setting.activeTab.containerEl;
+
+		const headings = [...root.querySelectorAll('.setting-item-heading .setting-item-name')]
+			.map(el => el.textContent);
+		// The width row, found by its name, regardless of position.
+		const widthRow = () => [...root.querySelectorAll('.setting-item')]
+			.find(el => {
+				const n = el.querySelector('.setting-item-name');
+				return n && n.textContent === 'Compact tab width';
+			});
+		const widthVisible = () => {
+			const el = widthRow();
+			return !!el && getComputedStyle(el).display !== 'none';
+		};
+		const toggleEl = [...root.querySelectorAll('.setting-item')]
+			.find(el => {
+				const n = el.querySelector('.setting-item-name');
+				return n && n.textContent === 'Enable compact pinned tabs';
+			})
+			.querySelector('.checkbox-container');
+
+		// Start from off, then flip the real toggle and watch the width row follow.
+		rp.settings.compactPinnedTabs = false;
+		app.setting.openTabById('real-pin');
+		await new Promise(r => setTimeout(r, 250));
+		const visibleWhenOff = widthVisible();
+
+		const liveToggle = [...app.setting.activeTab.containerEl.querySelectorAll('.setting-item')]
+			.find(el => {
+				const n = el.querySelector('.setting-item-name');
+				return n && n.textContent === 'Enable compact pinned tabs';
+			})
+			.querySelector('.checkbox-container');
+		liveToggle.click();
+		await new Promise(r => setTimeout(r, 250));
+		const root2 = app.setting.activeTab.containerEl;
+		const widthRow2 = [...root2.querySelectorAll('.setting-item')]
+			.find(el => {
+				const n = el.querySelector('.setting-item-name');
+				return n && n.textContent === 'Compact tab width';
+			});
+		const visibleAfterEnabling = !!widthRow2 && getComputedStyle(widthRow2).display !== 'none';
+		const settingAfterClick = rp.settings.compactPinnedTabs;
+
+		// A slider renders its value inline (Obsidian does this itself since 1.13).
+		const hasSlider = !!(widthRow2 && widthRow2.querySelector('input[type=range]'));
+
+		app.setting.close();
+		rp.settings.compactPinnedTabs = wasOn;
+		rp.compactTabs.apply();
+		await new Promise(r => setTimeout(r, 150));
+		return { headings, visibleWhenOff, visibleAfterEnabling, settingAfterClick, hasSlider };
+	`);
+	assert.ok(
+		r.headings.includes("Compact pinned tabs"),
+		`compact pinned tabs has its own heading (got ${JSON.stringify(r.headings)})`,
+	);
+	assert.ok(
+		r.headings.includes("Tab groups"),
+		"tab groups keeps its heading",
+	);
+	assert.equal(r.visibleWhenOff, false, "the width row is hidden while compacting is off");
+	assert.equal(r.settingAfterClick, true, "clicking the toggle turns compacting on");
+	assert.equal(r.visibleAfterEnabling, true, "and the width row appears with it");
+	assert.equal(r.hasSlider, true, "the width row still renders its slider");
+});
