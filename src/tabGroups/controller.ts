@@ -21,6 +21,7 @@ import {
 	setHeaderAttrs,
 	updateChip,
 } from "./overlay";
+import { ConfirmModal } from "../ConfirmModal";
 import { GroupEditModal, GroupSuggestModal } from "./modals";
 import { SavedGroupsView, VIEW_TYPE_SAVED_GROUPS } from "./SavedGroupsView";
 
@@ -443,6 +444,27 @@ export class TabGroupController {
 		const group = this.createGroupNamed(newIds, saved.name, saved.color);
 		saved.linkedLiveGroupId = group.id;
 		void this.plugin.saveSavedGroups(this.plugin.getSavedGroups());
+	}
+
+	/**
+	 * Ask before destroying a saved group. The library entry is the only copy —
+	 * deleting it can't be undone — and its menu item sits right below "Edit", so
+	 * the gesture is easy to hit by mistake. `deleteSavedGroup` stays the
+	 * unguarded primitive for programmatic callers.
+	 */
+	confirmDeleteSavedGroup(savedId: string): void {
+		const s = this.plugin.getSavedGroups().find((x) => x.id === savedId);
+		if (!s) return;
+		const n = s.members.length;
+		void new ConfirmModal(this.plugin.app, {
+			title: `Delete saved group "${s.name}"?`,
+			body: `This removes it and its ${n} ${n === 1 ? "tab" : "tabs"} from your library. Any tabs open right now stay open.`,
+			confirmText: "Delete",
+		})
+			.ask()
+			.then((confirmed) => {
+				if (confirmed) this.deleteSavedGroup(savedId);
+			});
 	}
 
 	deleteSavedGroup(savedId: string): void {

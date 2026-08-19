@@ -1,16 +1,26 @@
 import { App, ButtonComponent, Modal, Setting } from "obsidian";
 
+/** The text of one confirmation prompt. */
+export interface ConfirmOptions {
+	title: string;
+	body: string;
+	/** Label for the destructive confirm button (e.g. "Close tab", "Delete"). */
+	confirmText: string;
+}
+
 /**
  * A yes/no confirmation dialog that resolves a Promise<boolean> with the
  * user's choice. Resolves `true` only when the user explicitly confirms;
  * Esc, click-outside, or Cancel all resolve `false`.
  */
-export class ConfirmCloseModal extends Modal {
+export class ConfirmModal extends Modal {
+	private readonly opts: ConfirmOptions;
 	private resolve!: (confirmed: boolean) => void;
 	private settled = false;
 
-	constructor(app: App) {
+	constructor(app: App, opts: ConfirmOptions) {
 		super(app);
+		this.opts = opts;
 	}
 
 	/** Open the modal and await the user's decision. */
@@ -22,10 +32,8 @@ export class ConfirmCloseModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.titleEl.setText("Close pinned tab?");
-		this.contentEl.createEl("p", {
-			text: "This tab is pinned. Are you sure you want to close it?",
-		});
+		this.titleEl.setText(this.opts.title);
+		this.contentEl.createEl("p", { text: this.opts.body });
 
 		new Setting(this.contentEl)
 			.addButton((btn) =>
@@ -35,7 +43,7 @@ export class ConfirmCloseModal extends Modal {
 				}),
 			)
 			.addButton((btn) => {
-				btn.setButtonText("Close tab").onClick(() => {
+				btn.setButtonText(this.opts.confirmText).onClick(() => {
 					this.settle(true);
 					this.close();
 				});

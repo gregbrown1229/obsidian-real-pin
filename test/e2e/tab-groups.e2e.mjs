@@ -681,6 +681,59 @@ test("the saved-groups panel lists saved groups", async () => {
 	assert.ok(rows >= 1, "panel renders at least one saved group");
 });
 
+test("deleting a saved group asks first, and cancelling keeps it", async () => {
+	// The library entry is the only copy and its menu item sits right below
+	// "Edit", so the delete gesture is easy to hit by mistake.
+	const r = await obs.evalInApp(`
+		const rp = window.__tg.rp;
+		const app = window.app;
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		await ensure('del-1.md');
+		const leaf = app.workspace.getLeaf('tab');
+		await leaf.openFile(app.vault.getAbstractFileByPath('del-1.md'));
+		await new Promise(r => setTimeout(r, 150));
+		const g = rp.tabGroups.createGroup([leaf.id]);
+		await new Promise(r => setTimeout(r, 120));
+		rp.tabGroups.saveGroup(g.id);
+		await new Promise(r => setTimeout(r, 150));
+		const s = rp.getSavedGroups().find(x => x.linkedLiveGroupId === g.id);
+		const has = () => rp.getSavedGroups().some(x => x.id === s.id);
+
+		const dialog = () => [...activeDocument.querySelectorAll('.modal-container')]
+			.find(m => m.textContent.includes('Delete saved group')) || null;
+		const press = (label) => {
+			const m = dialog();
+			const b = m && [...m.querySelectorAll('button')].find(x => x.textContent === label);
+			if (b) b.click();
+		};
+
+		// Ask, then cancel -> the entry survives.
+		rp.tabGroups.confirmDeleteSavedGroup(s.id);
+		await new Promise(r => setTimeout(r, 250));
+		const asked = !!dialog();
+		const keptWhileOpen = has();
+		press('Cancel');
+		await new Promise(r => setTimeout(r, 200));
+		const keptAfterCancel = has();
+
+		// Ask again, then confirm -> the entry is gone.
+		rp.tabGroups.confirmDeleteSavedGroup(s.id);
+		await new Promise(r => setTimeout(r, 250));
+		press('Delete');
+		await new Promise(r => setTimeout(r, 250));
+		const goneAfterConfirm = !has();
+
+		rp.tabGroups.ungroup(g.id);
+		leaf.detach();
+		await new Promise(r => setTimeout(r, 150));
+		return { asked, keptWhileOpen, keptAfterCancel, goneAfterConfirm };
+	`);
+	assert.equal(r.asked, true, "deleting a saved group opens a confirmation");
+	assert.equal(r.keptWhileOpen, true, "nothing is deleted while the prompt is open");
+	assert.equal(r.keptAfterCancel, true, "cancelling keeps the saved group");
+	assert.equal(r.goneAfterConfirm, true, "confirming deletes it");
+});
+
 test("disabling the feature reverts every tab and removes chips", async () => {
 	const r = await obs.evalInApp(`
 		const rp = window.__tg.rp;

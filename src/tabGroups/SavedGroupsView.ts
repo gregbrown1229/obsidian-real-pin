@@ -108,7 +108,9 @@ export class SavedGroupsView extends ItemView {
 			i
 				.setTitle("Delete")
 				.setIcon("trash")
-				.onClick(() => this.plugin.tabGroups.deleteSavedGroup(savedId)),
+				.onClick(() =>
+					this.plugin.tabGroups.confirmDeleteSavedGroup(savedId),
+				),
 		);
 		menu.showAtMouseEvent(evt);
 	}
