@@ -681,6 +681,50 @@ test("the saved-groups panel lists saved groups", async () => {
 	assert.ok(rows >= 1, "panel renders at least one saved group");
 });
 
+test("with the feature off, tab-group commands are unavailable and create no hidden state", async () => {
+	// Regression guard: the commands used to run regardless. "New tab group from
+	// active tab" pushed a group into the model that rendered nothing while the
+	// feature was off, then materialized the moment it was switched on.
+	const r = await obs.evalInApp(`
+		const app = window.app;
+		const rp = app.plugins.plugins['real-pin'];
+		const wasEnabled = rp.settings.enableTabGroups;
+		const groupsBefore = rp.tabGroups.getGroups().length;
+
+		rp.settings.enableTabGroups = false;
+		rp.tabGroups.apply();
+		await new Promise(r => setTimeout(r, 150));
+
+		// executeCommandById runs the checkCallback first; an unavailable command
+		// returns false and never runs, so this is also how the palette filters it.
+		const ran = app.commands.executeCommandById('real-pin:new-tab-group');
+		await new Promise(r => setTimeout(r, 200));
+		const groupsWhileOff = rp.tabGroups.getGroups().length;
+
+		// The real tell: switching the feature back on must not surface a group
+		// that was conjured while it was off.
+		rp.settings.enableTabGroups = true;
+		rp.tabGroups.apply();
+		await new Promise(r => setTimeout(r, 250));
+		const groupsAfterReenable = rp.tabGroups.getGroups().length;
+
+		// And the command works normally once the feature is on.
+		const ranWhenOn = app.commands.executeCommandById('real-pin:new-tab-group');
+		await new Promise(r => setTimeout(r, 250));
+		const groupsAfterRun = rp.tabGroups.getGroups().length;
+
+		rp.settings.enableTabGroups = wasEnabled;
+		rp.tabGroups.apply();
+		await new Promise(r => setTimeout(r, 150));
+		return { ran, ranWhenOn, groupsBefore, groupsWhileOff, groupsAfterReenable, groupsAfterRun };
+	`);
+	assert.equal(r.ran, false, "the command reports itself unavailable while the feature is off");
+	assert.equal(r.groupsWhileOff, r.groupsBefore, "no group is created while the feature is off");
+	assert.equal(r.groupsAfterReenable, r.groupsBefore, "no phantom group materializes when the feature is switched on");
+	assert.equal(r.ranWhenOn, true, "the command is available again once the feature is on");
+	assert.equal(r.groupsAfterRun, r.groupsBefore + 1, "and it still creates a group normally");
+});
+
 test("disabling the feature reverts every tab and removes chips", async () => {
 	const r = await obs.evalInApp(`
 		const rp = window.__tg.rp;

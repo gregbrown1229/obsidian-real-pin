@@ -58,37 +58,54 @@ export default class RealPinPlugin extends Plugin {
 			void this.activateSavedGroupsView();
 		});
 
-		this.addCommand({
-			id: "new-tab-group",
-			name: "New tab group from active tab",
-			callback: () => this.tabGroups.createGroupFromActiveLeaf(),
-		});
-		this.addCommand({
-			id: "save-tab-group",
-			name: "Save the active tab's group to the library",
-			callback: () => this.tabGroups.saveActiveGroup(),
-		});
-		this.addCommand({
-			id: "open-saved-groups",
-			name: "Open the saved tab groups panel",
-			callback: () => {
+		this.addTabGroupCommand("new-tab-group", "New tab group from active tab", () =>
+			this.tabGroups.createGroupFromActiveLeaf(),
+		);
+		this.addTabGroupCommand(
+			"save-tab-group",
+			"Save the active tab's group to the library",
+			() => this.tabGroups.saveActiveGroup(),
+		);
+		this.addTabGroupCommand(
+			"open-saved-groups",
+			"Open the saved tab groups panel",
+			() => {
 				void this.activateSavedGroupsView();
 			},
-		});
+		);
+		this.addTabGroupCommand("add-tab-to-group", "Add active tab to group", () =>
+			this.tabGroups.addActiveLeafToGroupPrompt(),
+		);
+		this.addTabGroupCommand(
+			"edit-tab-group",
+			"Edit the active tab's group (name and color)",
+			() => this.tabGroups.editActiveGroup(),
+		);
+		this.addTabGroupCommand(
+			"toggle-tab-group-collapse",
+			"Toggle collapse of the active tab's group",
+			() => this.tabGroups.toggleCollapseActive(),
+		);
+	}
+
+	/**
+	 * Register a command that only exists while tab groups are enabled.
+	 *
+	 * With the feature off these commands used to run anyway: most did nothing
+	 * visible, but "New tab group from active tab" pushed a group into the model
+	 * that renders nothing now and then *materializes* when the feature is later
+	 * switched on. `checkCallback` returning false is Obsidian's own way to say
+	 * "unavailable", so the palette simply doesn't offer them.
+	 */
+	private addTabGroupCommand(id: string, name: string, run: () => void): void {
 		this.addCommand({
-			id: "add-tab-to-group",
-			name: "Add active tab to group",
-			callback: () => this.tabGroups.addActiveLeafToGroupPrompt(),
-		});
-		this.addCommand({
-			id: "edit-tab-group",
-			name: "Edit the active tab's group (name and color)",
-			callback: () => this.tabGroups.editActiveGroup(),
-		});
-		this.addCommand({
-			id: "toggle-tab-group-collapse",
-			name: "Toggle collapse of the active tab's group",
-			callback: () => this.tabGroups.toggleCollapseActive(),
+			id,
+			name,
+			checkCallback: (checking) => {
+				if (!this.settings.enableTabGroups) return false;
+				if (!checking) run();
+				return true;
+			},
 		});
 	}
 
