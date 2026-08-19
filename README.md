@@ -1,6 +1,14 @@
 # Real Pin
 
-Makes a pinned tab's pin actually mean something for the keyboard.
+Makes a pinned tab's pin actually mean something — plus a compact pinned-tab strip and Chrome-style tab groups.
+
+Three independent features for Obsidian's tab bar, each toggled on its own:
+
+- **Pin protection** (on by default) — a close hotkey or command can't quietly lose a pinned tab.
+- **Compact pinned tabs** (off by default) — pinned tabs shrink to icon-only, so a row of them reads as a compact icon strip. Pure CSS.
+- **Tab groups** (off by default) — organize tabs into named, colored, collapsible groups inside the single tab bar, and save groups to reopen later.
+
+## Pin protection
 
 Obsidian lets you pin a tab, but pinning doesn't stop the **Close current tab** command (`Cmd+W` / `Ctrl+W` by default) from closing it — one stray keystroke and the tab is gone. **Real Pin** intercepts that command: when the active tab is pinned, it pops a confirmation dialog instead of closing immediately. Confirm to close, cancel (or `Esc`) to keep it.
 
