@@ -1,7 +1,6 @@
 # a4 — Confirm before deleting a saved group
 
-**Effort:** S · **Depends on:** a3 (soft — same file; preserve its focus
-behavior) · **Blocks:** b3
+**Effort:** S · **Depends on:** nothing · **Blocks:** b3
 
 ## Problem
 
@@ -16,7 +15,9 @@ is gone.
    already promise-based and reusable. Add constructor parameters for title,
    body, and confirm-button label, defaulting to the current pinned-tab text
    so the existing call site (`src/main.ts:196`) is unchanged. Keep the
-   destructive styling (`markDestructive`) and a3's focused-confirm behavior.
+   destructive styling (`markDestructive`). Don't add focus handling — Obsidian
+   already focuses the dialog's first button on open (see "Dropped plans" in the
+   index).
    Consider renaming to `ConfirmModal` with `ConfirmCloseModal` retained as
    the default-text construction, or just parameterize in place — smallest
    diff wins.

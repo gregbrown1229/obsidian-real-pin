@@ -13,8 +13,8 @@ Effort: **S** = under half a day, **M** = 1–2 days.
 | --- | --- | --- | --- |
 | [a1](a1-focus-open-saved-group.md) | Focus instead of duplicating an already-open saved group | S | — |
 | [a2](a2-block-mode-settings-copy.md) | Make the silent block mode discoverable in settings copy | S | — |
-| [a3](a3-confirm-modal-keyboard.md) | Keyboard-fluent confirm modal (focus the confirm button) | S | — (see note in a4) |
-| [a4](a4-confirm-saved-group-delete.md) | Confirm before deleting a saved group | S | a3 (soft: generalizes the same modal) |
+| ~~a3~~ | ~~Keyboard-fluent confirm modal~~ — **dropped**, Obsidian already does this (see below) | — | — |
+| [a4](a4-confirm-saved-group-delete.md) | Confirm before deleting a saved group | S | — |
 | [a5](a5-guard-commands-when-disabled.md) | Stop tab-group commands from silently mutating hidden state | S | — |
 | [a6](a6-settings-structure.md) | Settings page structure, slider tooltip, dependent control | S | — |
 | [a7](a7-saved-panel-polish.md) | Saved-groups panel: dead-end empty state, friendly member labels | S | — |
@@ -36,16 +36,13 @@ Effort: **S** = under half a day, **M** = 1–2 days.
 ## Dependency map
 
 ```
-a3 ──(soft)──▶ a4 ──▶ b3
-a1 ───────────────▶ b6
+a4 ──▶ b3
+a1 ──▶ b6
 b7 ──(recommended)▶ b2
 b1 ──▶ (blocked on human approval + spike S9)
 everything else: independent
 ```
 
-- **a3 → a4:** both touch `ConfirmCloseModal`. a4 generalizes it (parameterized
-  title/body/confirm label); a3's focus-the-confirm-button behavior must be
-  preserved in the generalized form. Land a3 first, or do both in one PR.
 - **a4 → b3:** b3's pinned-member confirmation reuses the generalized modal.
 - **a1 → b6:** b6 keeps a1's "focus if already open" as the uniform precedence
   rule for every open target, so a1's check must exist first.
@@ -55,9 +52,22 @@ everything else: independent
   mechanism (CLAUDE.md prime directive 2) and spike S9 has determined which
   event Obsidian closes on.
 
+## Dropped plans
+
+- **a3 (keyboard-fluent confirm modal) — dropped, don't retry.** The premise was
+  wrong. An e2e diagnostic against real Obsidian shows the modal **already**
+  takes focus on open: Obsidian focuses the first button (**Cancel**) and never
+  re-steals it. The dialog is keyboard-operable out of the box — Tab reaches
+  "Close tab", Enter activates the focused button, Esc cancels — and
+  Cancel-focused is the *safer* default for a destructive confirm. Adding code to
+  move focus to the confirm button would override sensible platform behavior for
+  no user-visible gain. (Focusing it *after* open does stick, since Obsidian
+  steals focus exactly once — achievable, just not worth doing.) Closed unmerged
+  as #15.
+
 ## Recommended order
 
-1. **Wave 1 (no approvals):** a1–a8, b7, b8 — any order except a3 before/with a4.
+1. **Wave 1 (no approvals):** a1, a2, a4–a8, b7, b8 — all independent.
 2. **Wave 2:** b3 + b4 (chip-menu cluster), then b5.
 3. **Wave 3:** b1 (after sign-off + spike), then b2, b6.
 
