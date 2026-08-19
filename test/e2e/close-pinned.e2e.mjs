@@ -118,6 +118,32 @@ test("Cmd+W on a focused pinned tab asks for confirmation (and closes nothing un
 	assert.equal(r.after, r.before, "nothing closes while the prompt is open");
 });
 
+test("the confirm dialog gives initial focus to its confirm button", async () => {
+	// So a flow that began at a keystroke stays on the keyboard: with the confirm
+	// button focused, Enter/Space natively activates it (Cmd+W -> Enter closes),
+	// Tab reaches Cancel, and Esc still cancels via Obsidian's modal handling.
+	await reset();
+	const r = await obs.evalInApp(`
+		const cp = window.__cp;
+		await cp.open('cp-1.md', true); // pinned, active
+		await new Promise((r) => setTimeout(r, 150));
+		cp.close();
+		await new Promise((r) => setTimeout(r, 250));
+		const modal = cp.confirmModal();
+		const active = activeDocument.activeElement;
+		const out = {
+			modal: !!modal,
+			confirmFocused: !!modal && !!active && active.tagName === 'BUTTON' && active.textContent === 'Close tab',
+			focusInsideModal: !!modal && !!active && modal.contains(active),
+		};
+		cp.dismissModal();
+		return out;
+	`);
+	assert.equal(r.modal, true, "the confirm dialog opens");
+	assert.equal(r.confirmFocused, true, "the confirm button receives initial focus");
+	assert.equal(r.focusInsideModal, true, "focus is inside the dialog, ready for Enter/Tab/Esc");
+});
+
 test("REGRESSION (file explorer focus): Cmd+W with focus in the file explorer still prompts for the pinned tab", async () => {
 	// The reported repro: a pinned tab is the current main-area tab, but focus is
 	// in the file explorer (left pane). Cmd+W closes the current main tab, not the

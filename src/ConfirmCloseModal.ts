@@ -40,6 +40,12 @@ export class ConfirmCloseModal extends Modal {
 					this.close();
 				});
 				this.markDestructive(btn);
+				// Focus the confirm button so a flow that began at a keystroke stays
+				// on the keyboard: Enter/Space confirms, Tab reaches Cancel, Esc
+				// cancels. Default-focusing the destructive action is safe here — the
+				// modal opens only in direct response to an explicit close command, so
+				// Enter matches the intent the user just expressed.
+				btn.buttonEl.focus();
 			});
 	}
 
