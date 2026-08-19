@@ -685,44 +685,63 @@ test("with the feature off, tab-group commands are unavailable and create no hid
 	// Regression guard: the commands used to run regardless. "New tab group from
 	// active tab" pushed a group into the model that rendered nothing while the
 	// feature was off, then materialized the moment it was switched on.
+	// Tracks one dedicated tab of its own, so ambient groups left by other tests
+	// can't shift a global count out from under it.
 	const r = await obs.evalInApp(`
 		const app = window.app;
 		const rp = app.plugins.plugins['real-pin'];
 		const wasEnabled = rp.settings.enableTabGroups;
-		const groupsBefore = rp.tabGroups.getGroups().length;
+		const ensure = async (p) => app.vault.getAbstractFileByPath(p) || await app.vault.create(p, '# ' + p);
+		await ensure('gc-1.md');
+		const leaf = app.workspace.getLeaf('tab');
+		await leaf.openFile(app.vault.getAbstractFileByPath('gc-1.md'));
+		await new Promise(r => setTimeout(r, 200));
+		const grouped = () => rp.tabGroups.getGroups().some(g => g.memberIds.includes(leaf.id));
 
 		rp.settings.enableTabGroups = false;
 		rp.tabGroups.apply();
+		await new Promise(r => setTimeout(r, 200));
+		app.workspace.setActiveLeaf(leaf, { focus: true });
 		await new Promise(r => setTimeout(r, 150));
 
-		// executeCommandById runs the checkCallback first; an unavailable command
-		// returns false and never runs, so this is also how the palette filters it.
-		const ran = app.commands.executeCommandById('real-pin:new-tab-group');
-		await new Promise(r => setTimeout(r, 200));
-		const groupsWhileOff = rp.tabGroups.getGroups().length;
+		// listCommands() is the set the command palette offers — an unavailable
+		// command is filtered out of it. (executeCommandById is NOT an availability
+		// signal: it returns true for "dispatched a command" either way, which is
+		// why we assert on the palette list and on the model instead.)
+		const listed = () => app.commands.listCommands().some(c => c.id === 'real-pin:new-tab-group');
+		const listedWhileOff = listed();
+		app.commands.executeCommandById('real-pin:new-tab-group');
+		await new Promise(r => setTimeout(r, 250));
+		const groupedWhileOff = grouped();
 
 		// The real tell: switching the feature back on must not surface a group
 		// that was conjured while it was off.
 		rp.settings.enableTabGroups = true;
 		rp.tabGroups.apply();
-		await new Promise(r => setTimeout(r, 250));
-		const groupsAfterReenable = rp.tabGroups.getGroups().length;
+		await new Promise(r => setTimeout(r, 300));
+		const groupedAfterReenable = grouped();
 
-		// And the command works normally once the feature is on.
-		const ranWhenOn = app.commands.executeCommandById('real-pin:new-tab-group');
-		await new Promise(r => setTimeout(r, 250));
-		const groupsAfterRun = rp.tabGroups.getGroups().length;
+		// And the command is offered again — and works — once the feature is on.
+		const listedWhenOn = listed();
+		app.workspace.setActiveLeaf(leaf, { focus: true });
+		await new Promise(r => setTimeout(r, 150));
+		app.commands.executeCommandById('real-pin:new-tab-group');
+		await new Promise(r => setTimeout(r, 300));
+		const groupedAfterRun = grouped();
 
+		const g = rp.tabGroups.getGroups().find(x => x.memberIds.includes(leaf.id));
+		if (g) rp.tabGroups.ungroup(g.id);
+		leaf.detach();
 		rp.settings.enableTabGroups = wasEnabled;
 		rp.tabGroups.apply();
-		await new Promise(r => setTimeout(r, 150));
-		return { ran, ranWhenOn, groupsBefore, groupsWhileOff, groupsAfterReenable, groupsAfterRun };
+		await new Promise(r => setTimeout(r, 200));
+		return { listedWhileOff, listedWhenOn, groupedWhileOff, groupedAfterReenable, groupedAfterRun };
 	`);
-	assert.equal(r.ran, false, "the command reports itself unavailable while the feature is off");
-	assert.equal(r.groupsWhileOff, r.groupsBefore, "no group is created while the feature is off");
-	assert.equal(r.groupsAfterReenable, r.groupsBefore, "no phantom group materializes when the feature is switched on");
-	assert.equal(r.ranWhenOn, true, "the command is available again once the feature is on");
-	assert.equal(r.groupsAfterRun, r.groupsBefore + 1, "and it still creates a group normally");
+	assert.equal(r.listedWhileOff, false, "the command palette doesn't offer it while the feature is off");
+	assert.equal(r.groupedWhileOff, false, "no group is created while the feature is off");
+	assert.equal(r.groupedAfterReenable, false, "no phantom group materializes when the feature is switched on");
+	assert.equal(r.listedWhenOn, true, "the palette offers it again once the feature is on");
+	assert.equal(r.groupedAfterRun, true, "and it still groups the active tab normally");
 });
 
 test("disabling the feature reverts every tab and removes chips", async () => {
