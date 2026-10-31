@@ -2,6 +2,7 @@ import { Plugin, WorkspaceLeaf } from "obsidian";
 import { around } from "monkey-around";
 import { ConfirmCloseModal } from "./ConfirmCloseModal";
 import { CompactPinnedTabs } from "./compactPinnedTabs";
+import { PinnedTabsFirst } from "./pinnedTabsFirst/controller";
 import { TabGroupController } from "./tabGroups/controller";
 import {
 	SavedGroupsView,
@@ -31,6 +32,7 @@ type CommandsRegistry = { commands: Record<string, CloseCommand | undefined> };
 export default class RealPinPlugin extends Plugin {
 	settings!: RealPinSettings;
 	compactTabs!: CompactPinnedTabs;
+	pinnedTabsFirst!: PinnedTabsFirst;
 	tabGroups!: TabGroupController;
 	private data!: PersistedData<RealPinSettings>;
 
@@ -44,6 +46,11 @@ export default class RealPinPlugin extends Plugin {
 		// every window on unload.
 		this.compactTabs = new CompactPinnedTabs(this);
 		this.app.workspace.onLayoutReady(() => this.compactTabs.start());
+
+		// Keep pinned tabs first: same lifecycle. Started before tab groups so its
+		// `layout-change` sort runs first and groups reconcile the sorted strip.
+		this.pinnedTabsFirst = new PinnedTabsFirst(this);
+		this.app.workspace.onLayoutReady(() => this.pinnedTabsFirst.start());
 
 		// Tab groups: same lifecycle — start once the layout is ready so existing
 		// tabs/popouts are picked up; `start()` registers its own teardown.

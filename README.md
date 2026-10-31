@@ -25,6 +25,16 @@ Shrinks every pinned tab to just its icon, so a row of pinned tabs reads as a co
 - Works in popped-out windows too. Takes effect immediately — no reload needed. Turning it off (or disabling Real Pin) restores every tab.
 - Use the **Compact tab width** slider in settings to choose how narrow a compacted tab gets (it drives the `--real-pin-compact-tab-width` CSS variable, default `72px`). Obsidian grows tabs to fill the bar and won't size them to their content, so the width is a cap rather than a true shrink-to-fit.
 
+**Keep pinned tabs first** (default: off)
+
+Keeps pinned tabs before all other tabs in every tab bar, like Chrome.
+
+- **Pin** a tab → it moves to the end of the pinned tabs. **Unpin** it → it moves just after them.
+- **Drag** freely within the pinned tabs or within the unpinned ones. A tab dropped across that boundary snaps back to it.
+- Turning it on sorts your open tabs right away. Applies to each split pane and popped-out window on its own; sidebars are left alone. Turning it off stops enforcing (it doesn't move anything back).
+- With **tab groups** on, pinned tabs can't be grouped (as in Chrome): pinning a grouped tab removes it from its group, and adding a pinned tab to a group unpins it.
+- Obsidian has no API for reordering tabs, so this uses the same guarded internal tab-strip calls tab groups already relies on, and does nothing if a future Obsidian removes them.
+
 ## Tab groups (Chrome-style)
 
 Organize tabs into named, colored, collapsible groups **inside the single tab bar** — like Google Chrome's tab groups — and save groups to reopen later.
@@ -68,7 +78,7 @@ Every change ships production-ready — see [CONTRIBUTING.md](CONTRIBUTING.md) f
 
 ### End-to-end tests
 
-`npm run test:e2e` drives the compact-pinned-tabs feature in a **real, headless Obsidian** — the automated form of manually pinning tabs in the app. It launches a sandboxed Obsidian via [`obsidian-launcher`](https://www.npmjs.com/package/obsidian-launcher) and drives the renderer over the Chrome DevTools Protocol (Obsidian's packaged-Electron build blocks Playwright, so we use raw CDP, as the Obsidian CLI and WebdriverIO do). It asserts the real behavior: pinning shrinks a tab and hides its title, an unpinned tab is untouched, pin/unpin is reactive, the width slider drives the cap, and the toggle fully reverts.
+`npm run test:e2e` drives the plugin's features (close confirmation, compact pinned tabs, keep pinned tabs first, tab groups) in a **real, headless Obsidian** — the automated form of manually pinning tabs in the app. It launches a sandboxed Obsidian via [`obsidian-launcher`](https://www.npmjs.com/package/obsidian-launcher) and drives the renderer over the Chrome DevTools Protocol (Obsidian's packaged-Electron build blocks Playwright, so we use raw CDP, as the Obsidian CLI and WebdriverIO do). It asserts the real behavior: e.g. pinning shrinks a tab and hides its title, pinned tabs are kept first across pin/unpin/drag in every pane, groups tag and reorder their tabs, and every toggle fully reverts.
 
 ```bash
 npm run build         # the test installs the built plugin, so build first

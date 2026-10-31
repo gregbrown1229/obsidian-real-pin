@@ -91,6 +91,17 @@ regressions:
   `leaf.tabHeaderEl`, `WorkspaceTabs` child ops, `getLeafById`), degrading to inert
   if it's absent. Confirm any public API exists at `minAppVersion` — `lint`'s
   `no-unsupported-api` enforces this.
+- **Pinning fires only the per-leaf `pinned-change` event**, never
+  `layout-change` (`setPinned` just calls `requestSaveLayout`). To react to
+  pin/unpin, listen on each leaf. Opening, closing and reordering tabs *do* fire
+  `layout-change` (debounced, async).
+- **Reorder tabs only through `moveLeafToIndex`** (`src/workspaceTabs.ts`). Raw
+  `removeChild`/`insertChild` don't keep the strip's `currentTab` in step, so a
+  move at or left of the shown tab silently switches which tab is displayed; the
+  helper re-selects it. After a move, read order from `parent.children` (updated
+  synchronously); the tab-header DOM lags.
+- **`getLeaf('tab')` reuses an empty active tab** rather than creating one, so in
+  tests never assume the leaf it returns is new.
 - **UI text is sentence case** (the `obsidianmd` lint rule enforces it): "Add tab to
   new group", not "Add Tab To New Group".
 

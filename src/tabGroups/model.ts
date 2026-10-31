@@ -114,6 +114,23 @@ export function groupOfMap(groups: readonly TabGroup[]): Map<string, string> {
 	return map;
 }
 
+/**
+ * `groups` with the `drop` leaf ids removed from membership; groups left empty
+ * are dropped. Pure: unchanged groups are returned as-is, changed ones copied.
+ */
+export function withoutMembers(
+	groups: readonly TabGroup[],
+	drop: ReadonlySet<string>,
+): TabGroup[] {
+	const out: TabGroup[] = [];
+	for (const g of groups) {
+		const memberIds = g.memberIds.filter((m) => !drop.has(m));
+		if (memberIds.length === g.memberIds.length) out.push(g);
+		else if (memberIds.length > 0) out.push({ ...g, memberIds });
+	}
+	return out;
+}
+
 function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
 	if (a.length !== b.length) return false;
 	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;

@@ -24,6 +24,14 @@ export interface RealPinSettings {
 	compactTabWidth: number;
 
 	/**
+	 * When true, every main-area tab strip keeps its pinned tabs before all
+	 * other tabs, like Chrome: pinning moves a tab to the end of the pinned
+	 * block, unpinning moves it just after, and a drag across the boundary snaps
+	 * back. With tab groups on, pinned tabs can't be grouped.
+	 */
+	pinnedTabsFirst: boolean;
+
+	/**
 	 * When true, Chrome-style tab groups are active: tabs can be organized into
 	 * named, colored, collapsible groups within the tab bar. Off by default
 	 * (opt-in), since it injects a chip + tags tab headers in the tab strip.
@@ -41,6 +49,7 @@ export const DEFAULT_SETTINGS: RealPinSettings = {
 	confirmBeforeClose: true,
 	compactPinnedTabs: false,
 	compactTabWidth: COMPACT_WIDTH_DEFAULT,
+	pinnedTabsFirst: false,
 	enableTabGroups: false,
 };
 
@@ -72,7 +81,31 @@ export class RealPinSettingTab extends PluginSettingTab {
 			);
 
 		this.addCompactPinnedTabsSetting(containerEl);
+		this.addPinnedTabsFirstSetting(containerEl);
 		this.addTabGroupsSetting(containerEl);
+	}
+
+	private addPinnedTabsFirstSetting(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName("Keep pinned tabs first")
+			.setDesc(
+				"Like Chrome, pinned tabs always sit before all other tabs in each tab " +
+					"bar. Pinning a tab moves it to the end of the pinned tabs; unpinning " +
+					"moves it just after them. A tab dragged across that boundary snaps " +
+					"back. With tab groups on, pinning a grouped tab removes it from its " +
+					"group. Takes effect immediately.",
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.pinnedTabsFirst)
+					.onChange(async (value) => {
+						this.plugin.settings.pinnedTabsFirst = value;
+						await this.plugin.saveSettings();
+						// Sort existing tabs now, then ungroup any pinned members.
+						this.plugin.pinnedTabsFirst.apply();
+						this.plugin.tabGroups.apply();
+					}),
+			);
 	}
 
 	private addTabGroupsSetting(containerEl: HTMLElement): void {
