@@ -15,6 +15,7 @@ import {
 	findMovedId,
 	groupForMoved,
 	reconcile,
+	withoutMembers,
 	migrateData,
 	SCHEMA_VERSION,
 } from "../src/tabGroups/model.ts";
@@ -162,6 +163,20 @@ test("reconcile: a pure refresh (no change) preserves groups and order", () => {
 	const r = reconcile(groups, ["a", "b", "x"], ["a", "b", "x"]);
 	assert.deepEqual(r.groups[0].memberIds, ["a", "b"]);
 	assert.deepEqual(r.ungrouped, ["x"]);
+});
+
+test("withoutMembers drops ids, removes emptied groups, keeps others as-is", () => {
+	const keep = group("g1", ["a", "b"]);
+	const trim = group("g2", ["c", "P"]);
+	const gone = group("g3", ["P2"]);
+	const out = withoutMembers([keep, trim, gone], new Set(["P", "P2"]));
+	assert.deepEqual(out.map((g) => [g.id, g.memberIds]), [
+		["g1", ["a", "b"]],
+		["g2", ["c"]],
+	]);
+	assert.equal(out[0], keep, "an unchanged group is returned as-is");
+	assert.deepEqual(trim.memberIds, ["c", "P"], "input is not mutated");
+	assert.deepEqual(withoutMembers([keep], new Set()), [keep]);
 });
 
 test("migrateData: null yields a fresh v2 document", () => {

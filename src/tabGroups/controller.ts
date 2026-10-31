@@ -6,6 +6,7 @@ import {
 	memberFromViewState,
 	nextGroupName,
 	reconcile as reconcileMembership,
+	withoutMembers,
 } from "./model";
 import type {
 	GroupColor,
@@ -22,6 +23,8 @@ import {
 	updateChip,
 } from "./overlay";
 import { GroupEditModal, GroupSuggestModal } from "./modals";
+import { isPinned, moveLeafToIndex } from "../workspaceTabs";
+import type { TabsInternal } from "../workspaceTabs";
 import { SavedGroupsView, VIEW_TYPE_SAVED_GROUPS } from "./SavedGroupsView";
 
 /**
@@ -32,13 +35,6 @@ import { SavedGroupsView, VIEW_TYPE_SAVED_GROUPS } from "./SavedGroupsView";
 type LeafInternal = WorkspaceLeaf & {
 	id: string;
 	tabHeaderEl?: HTMLElement;
-};
-
-/** A few `WorkspaceTabs` internals, validated by spike S7. Used guardedly. */
-type TabsInternal = WorkspaceParent & {
-	removeChild?(leaf: WorkspaceLeaf): void;
-	insertChild?(index: number, leaf: WorkspaceLeaf): void;
-	children?: WorkspaceLeaf[];
 };
 
 /**
@@ -138,6 +134,7 @@ export class TabGroupController {
 	createGroup(memberIds: string[]): TabGroup | null {
 		const ids = memberIds.filter((m) => m.length > 0);
 		if (ids.length === 0) return null;
+		ids.forEach((m) => this.unpinForGrouping(m));
 		const used = new Set(this.groups.map((g) => g.color));
 		const color: GroupColor =
 			GROUP_COLORS.find((c) => !used.has(c)) ??
@@ -253,6 +250,8 @@ export class TabGroupController {
 	 * the group's run so the group stays a contiguous block.
 	 */
 	addLeafToGroup(leafId: string, groupId: string): void {
+		// First: unpinning can reconcile, which replaces the group objects.
+		this.unpinForGrouping(leafId);
 		const g = this.groups.find((x) => x.id === groupId);
 		if (!g) return;
 		for (const other of this.groups) {
@@ -275,6 +274,17 @@ export class TabGroupController {
 			}
 		}
 		this.reconcile();
+	}
+
+	/**
+	 * With "Keep pinned tabs first" on, a pinned tab can't be grouped (as in
+	 * Chrome), so explicitly grouping one unpins it; the sort then places it
+	 * first among the unpinned tabs.
+	 */
+	private unpinForGrouping(leafId: string): void {
+		if (!this.plugin.settings.pinnedTabsFirst) return;
+		const leaf = this.leafById(leafId);
+		if (leaf && isPinned(leaf)) leaf.setPinned(false);
 	}
 
 	/**
@@ -436,7 +446,10 @@ export class TabGroupController {
 				type: member.viewState.type,
 				state: member.viewState.state,
 			});
-			if (member.pinned) leaf.setPinned(true);
+			// Pinned tabs can't be grouped while "Keep pinned tabs first" is on.
+			if (member.pinned && !this.plugin.settings.pinnedTabsFirst) {
+				leaf.setPinned(true);
+			}
 			newIds.push(id(leaf));
 		}
 		if (newIds.length === 0) return;
@@ -526,16 +539,16 @@ export class TabGroupController {
 		return found;
 	}
 
-	/** Leaf-id order (DOM order) of the strip that `leaf` lives in, or null. */
+	/**
+	 * Leaf-id order of the strip that `leaf` lives in, or null. Read from the
+	 * strip's `children` model, the same indices `moveLeafToIndex` acts on: it's
+	 * complete (deferred tabs included) and updated synchronously by a move,
+	 * whereas the DOM lags behind one (e.g. "Keep pinned tabs first" re-sorting
+	 * the strip when grouping unpins a tab).
+	 */
 	private orderInParent(leaf: WorkspaceLeaf): string[] | null {
-		const strip = headerEl(leaf)?.parentElement;
-		if (!strip) return null;
-		const parent = leaf.parent;
-		const leaves: WorkspaceLeaf[] = [];
-		this.plugin.app.workspace.iterateAllLeaves((l) => {
-			if (l.parent === parent) leaves.push(l);
-		});
-		return readOrder(strip, leaves).order;
+		const children = (leaf.parent as TabsInternal | null)?.children;
+		return children ? children.map(id) : null;
 	}
 
 	/** Move `leaf` to sit immediately after `afterLeafId` within its strip. */
@@ -677,15 +690,25 @@ export class TabGroupController {
 				g.memberIds.some((m) => headerById.has(m)),
 			);
 			const prev = this.prevOrder.get(parent) ?? order;
-			const result = reconcileMembership(here, prev, order);
+			// With "Keep pinned tabs first" on, pinned tabs can't be grouped (as
+			// in Chrome). Drop them before inferring membership, so a pinned tab
+			// sorted out of its group's run isn't read as a drag, and after, so a
+			// pinned tab can never join one.
+			const pinned = this.plugin.settings.pinnedTabsFirst
+				? new Set(leaves.filter(isPinned).map(id))
+				: new Set<string>();
+			const groupsHere = withoutMembers(
+				reconcileMembership(withoutMembers(here, pinned), prev, order).groups,
+				pinned,
+			);
 
 			const stale = new Set(here);
 			this.groups = this.groups
 				.filter((g) => !stale.has(g))
-				.concat(result.groups);
+				.concat(groupsHere);
 			this.prevOrder.set(parent, order);
 
-			this.renderStrip(strip, order, headerById, result.groups, newTagged, seenGroupIds);
+			this.renderStrip(strip, order, headerById, groupsHere, newTagged, seenGroupIds);
 		}
 
 		// Clear attrs from headers tagged previously but not this pass.
@@ -1146,15 +1169,4 @@ function newId(): string {
 	const c = window.crypto;
 	if (c && typeof c.randomUUID === "function") return c.randomUUID();
 	return `g-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-}
-
-/** Move an existing leaf to `index` within its strip, if the internals exist. */
-export function moveLeafToIndex(leaf: WorkspaceLeaf, index: number): boolean {
-	const parent = leaf.parent as TabsInternal;
-	if (typeof parent.removeChild !== "function" || typeof parent.insertChild !== "function") {
-		return false;
-	}
-	parent.removeChild(leaf);
-	parent.insertChild(index, leaf);
-	return true;
 }
